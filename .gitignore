@@ -68,9 +68,9 @@ Saved/Logs/
 .VolumeIcon.icns
 .com.apple.timemachine.donotpresent
 
-# Android/IOS build artifacts
-[Aa]ndroid/
-[Ii]OS/
+# Android/IOS build artifacts (root level only)
+/[Aa]ndroid/
+/[Ii]OS/
 
 # Exceptions - KEEP these files (they are needed)
 !Build/**/*.png
