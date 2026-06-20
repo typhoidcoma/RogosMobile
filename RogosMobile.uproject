@@ -74,6 +74,14 @@
 		{
 			"Name": "PhysicsToolsets",
 			"Enabled": true
+		},
+		{
+			"Name": "BlueprintFileUtils",
+			"Enabled": true
+		},
+		{
+			"Name": "BlueprintSnapNodes",
+			"Enabled": true
 		}
 	]
 }
