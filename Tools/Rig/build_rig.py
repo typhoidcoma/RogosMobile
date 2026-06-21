@@ -46,10 +46,21 @@ pv=unreal.PelvisSettings(); pv.pelvis_bone=bone("body")
 # lean the body partly with the ground slope (ramps). Keep moderate: high values
 # (>=0.5 pelvis / >=0.8 foot) over-rotate and freeze the gait at pitch -60.
 pv.orient_to_ground_pitch=0.3; pv.orient_to_ground_roll=0.3
+# tighten the body to the capsule: default damping 0.1 + lead 2.0 lagged the body
+# behind the capsule (rig trailed the sensing) AND made falls look floaty (body
+# trailed the fast-falling capsule). NOTE: the pelvis is also speed-clamped to the
+# gait's SpeedMax (160) -> keep MoveSpeed <= ~160 or the body lags unboundedly.
+pv.position_damping_half_life=0.035   # 0.1 -> 0.035 (snappy follow)
+pv.lead_amount=0.5                    # 2.0 -> 0.5 (less forward over-anticipation)
+pv.bob_offset=-10.0                   # -8 -> -10 (a touch more step weight)
 loco.pelvis=pv
 mv=unreal.MovementSettings()
 # MinimumStepLength 8->20: deliberate steps, not a micro-shuffle (see tune_gait.py).
-mv.speed_min=20.0; mv.speed_max=160.0; mv.minimum_step_length=20.0
+# Higher Acceleration/SpeedMax: the gait's internal speed ramp was too slow (accel 100)
+# so the pelvis fell behind the capsule unboundedly through the constant wander turns
+# (rig trailed FAR). accel 800 / speedmax 200 bound the body lag to ~half a body length.
+mv.speed_min=20.0; mv.speed_max=200.0; mv.minimum_step_length=20.0
+mv.acceleration=800.0; mv.deceleration=400.0
 loco.movement=mv
 # ground collision ON: feet trace down to whatever surface is under them (floor OR
 # ramp). orient_foot_to_ground tilts each foot to plant flat on the slope.
