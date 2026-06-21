@@ -1,0 +1,10 @@
+import unreal
+bp=unreal.EditorAssetLibrary.load_asset("/Game/RogoBot/Character/BP_RogoBot")
+cdo=unreal.get_default_object(bp.generated_class())
+cm=next(iter(cdo.get_components_by_class(unreal.CharacterMovementComponent)))
+cm.set_editor_property("orient_rotation_to_movement", True)
+cm.set_editor_property("rotation_rate", unreal.Rotator(0,0,360))
+cdo.set_editor_property("use_controller_rotation_yaw", False)
+unreal.BlueprintEditorLibrary.compile_blueprint(bp)
+unreal.EditorAssetLibrary.save_asset("/Game/RogoBot/Character/BP_RogoBot", only_if_is_dirty=False)
+print("orient_to_movement:", cm.get_editor_property("orient_rotation_to_movement"))
