@@ -12,7 +12,7 @@ MEL=unreal.MaterialEditingLibrary
 
 def make_mat(name, color, translucent, opacity=1.0):
     p="/Game/RogoBot/Viz/"+name
-    if EAL.does_asset_exist(p): EAL.delete_asset(p)
+    if EAL.does_asset_exist(p): return EAL.load_asset(p)  # reuse (can't delete while referenced)
     m=at.create_asset(name,"/Game/RogoBot/Viz",unreal.Material,unreal.MaterialFactoryNew())
     m.set_editor_property("shading_model", unreal.MaterialShadingModel.MSM_UNLIT)
     if translucent: m.set_editor_property("blend_mode", unreal.BlendMode.BLEND_TRANSLUCENT)
@@ -60,10 +60,14 @@ def add_mesh(name, mesh, mat, loc, rot, scale):
     c.set_editor_property("cast_shadow", False)
     print("added", name)
 
-# cone points +Z by default -> pitch +90 to point +X (forward); small
-add_mesh("FrontArrow", cone, m_red, unreal.Vector(70,0,110), unreal.Rotator(0,90,0), unreal.Vector(0.35,0.35,0.7))
-# flat disc at feet; cylinder radius 50 -> scale 7 = radius 350 (overwritten at runtime)
-add_mesh("SenseRing", cyl, m_ring, unreal.Vector(0,0,-86), unreal.Rotator(0,0,0), unreal.Vector(7.0,7.0,0.02))
+# Positions are RELATIVE TO THE ACTOR ROOT (capsule center). With the matched
+# capsule (half-height 59) the actor rests at ground+59: feet at rel-Z -59,
+# body top at rel-Z ~ +59. Keep the arrow ON the body (low) so camera parallax
+# doesn't make it look detached/ahead; keep the ring at the feet.
+# cone points +Z by default -> pitch +90 to point +X (forward); small, hugs the upper-front of the body
+add_mesh("FrontArrow", cone, m_red, unreal.Vector(40,0,35), unreal.Rotator(0,90,0), unreal.Vector(0.3,0.3,0.6))
+# flat disc at the feet (rel-Z -58 = ground+1); cylinder radius 50 -> scale 7 = radius 350 (overwritten at runtime)
+add_mesh("SenseRing", cyl, m_ring, unreal.Vector(0,0,-58), unreal.Rotator(0,0,0), unreal.Vector(7.0,7.0,0.02))
 
 unreal.BlueprintEditorLibrary.compile_blueprint(bp)
 EAL.save_asset("/Game/RogoBot/Character/BP_RogoBot", only_if_is_dirty=False)
