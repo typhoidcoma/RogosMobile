@@ -43,9 +43,9 @@ begin=ctrl.add_unit_node_with_defaults(unreal.RigUnit_BeginExecution.static_stru
 loco=unreal.RigUnit_Locomotor()
 loco.root_control="root_ctrl"
 pv=unreal.PelvisSettings(); pv.pelvis_bone=bone("body")
-# orient_to_ground disabled: the mesh's -90 yaw maps the pelvis tilt axes wrong
-# and freezes the gait at pitch -60. Foot/body slope-adapt is a separate WIP.
-pv.orient_to_ground_pitch=0.0; pv.orient_to_ground_roll=0.0
+# lean the body partly with the ground slope (ramps). Keep moderate: high values
+# (>=0.5 pelvis / >=0.8 foot) over-rotate and freeze the gait at pitch -60.
+pv.orient_to_ground_pitch=0.3; pv.orient_to_ground_roll=0.3
 loco.pelvis=pv
 mv=unreal.MovementSettings()
 mv.speed_min=20.0; mv.speed_max=160.0; mv.minimum_step_length=8.0
@@ -55,8 +55,8 @@ loco.movement=mv
 st=unreal.StepSettings()
 st.enable_ground_collision=True
 st.enable_foot_collision=True
-st.orient_foot_to_ground_pitch=0.0
-st.orient_foot_to_ground_roll=0.0
+st.orient_foot_to_ground_pitch=0.4
+st.orient_foot_to_ground_roll=0.4
 loco.stepping=st
 ln=ctrl.add_unit_node_with_defaults(loco.static_struct(), loco.export_text(), 'Execute', unreal.Vector2D(-450,0))
 NP=ln.get_node_path()

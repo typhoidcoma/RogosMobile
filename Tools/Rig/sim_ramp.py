@@ -11,9 +11,10 @@ else:
     mesh=bot.get_component_by_class(unreal.SkeletalMeshComponent)
     bt=mesh.get_socket_transform("body", unreal.RelativeTransformSpace.RTS_WORLD)
     pitch=bt.rotation.rotator().pitch
-    fz={}
+    fz={}; fr={}
     for L in ("FL","FR","BL","BR"):
         t=mesh.get_socket_transform("ankle_"+L, unreal.RelativeTransformSpace.RTS_WORLD)
         fz[L]=round(t.translation.z,1)
-    print("capsule z=%.1f Yp=%.0f spd=%.0f | body pitch=%.1f | feet FL=%s FR=%s BL=%s BR=%s"%(
-        loc.z, loc.y, spd, pitch, fz["FL"],fz["FR"],fz["BL"],fz["BR"]))
+        r=t.rotation.rotator(); fr[L]=(round(r.pitch),round(r.roll))
+    print("capsule z=%.1f Yp=%.0f spd=%.0f | body pitch=%.1f | feetZ FL=%s FR=%s BL=%s BR=%s | FLrot=%s"%(
+        loc.z, loc.y, spd, pitch, fz["FL"],fz["FR"],fz["BL"],fz["BR"], fr["FL"]))
