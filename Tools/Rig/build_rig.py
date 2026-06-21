@@ -43,13 +43,15 @@ begin=ctrl.add_unit_node_with_defaults(unreal.RigUnit_BeginExecution.static_stru
 loco=unreal.RigUnit_Locomotor()
 loco.root_control="root_ctrl"
 pv=unreal.PelvisSettings(); pv.pelvis_bone=bone("body")
-pv.orient_to_ground_pitch=0.0; pv.orient_to_ground_roll=0.0   # no ground tilt (flat-ground gait)
+# orient_to_ground disabled: the mesh's -90 yaw maps the pelvis tilt axes wrong
+# and freezes the gait at pitch -60. Foot/body slope-adapt is a separate WIP.
+pv.orient_to_ground_pitch=0.0; pv.orient_to_ground_roll=0.0
 loco.pelvis=pv
 mv=unreal.MovementSettings()
 mv.speed_min=20.0; mv.speed_max=160.0; mv.minimum_step_length=8.0
 loco.movement=mv
-# keep ground collision ON so feet trace down to the floor (otherwise they park
-# ~13cm below the pelvis and float). Flat ground -> no foot tilt.
+# ground collision ON: feet trace down to whatever surface is under them (floor OR
+# ramp). orient_foot_to_ground tilts each foot to plant flat on the slope.
 st=unreal.StepSettings()
 st.enable_ground_collision=True
 st.enable_foot_collision=True
