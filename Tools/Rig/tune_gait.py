@@ -13,6 +13,9 @@ import unreal
 # ============================ CONFIG ============================
 MOVEMENT = {
     "MinimumStepLength": 20.0,   # was 8 -> deliberate steps, not micro-shuffle
+    "SpeedMax":          200.0,  # 160->200: headroom so the pelvis keeps up
+    "Acceleration":      800.0,  # 100->800: gait speed ramps fast enough through wander turns
+    "Deceleration":      400.0,
 }
 STEPPING = {
     "StepHeight":           14.0,   # was unset/6 -> clear foot lift (kills drag)
@@ -26,6 +29,11 @@ STEPPING = {
 PELVIS = {
     "OrientToGroundPitch": 0.3,
     "OrientToGroundRoll":  0.3,
+    # tighten the body to the capsule: 0.1 lagged the body ~tens of cm behind at
+    # speed AND made the fall look floaty (body trailed the fast-falling capsule).
+    "PositionDampingHalfLife": 0.035,   # was 0.1 -> body tracks the capsule snappily
+    "LeadAmount":              0.5,     # was 2.0 -> less forward over-anticipation
+    "BobOffset":              -10.0,    # was -8 -> a touch more step weight
 }
 # Per-foot. MaxHeelPeel Z restored (0 made the foot drag flat = slide).
 # StaticLocalOffset starts at 0 -> tune for machine spread after slide is fixed.
