@@ -48,15 +48,23 @@ pv=unreal.PelvisSettings(); pv.pelvis_bone=bone("body")
 pv.orient_to_ground_pitch=0.3; pv.orient_to_ground_roll=0.3
 loco.pelvis=pv
 mv=unreal.MovementSettings()
-mv.speed_min=20.0; mv.speed_max=160.0; mv.minimum_step_length=8.0
+# MinimumStepLength 8->20: deliberate steps, not a micro-shuffle (see tune_gait.py).
+mv.speed_min=20.0; mv.speed_max=160.0; mv.minimum_step_length=20.0
 loco.movement=mv
 # ground collision ON: feet trace down to whatever surface is under them (floor OR
 # ramp). orient_foot_to_ground tilts each foot to plant flat on the slope.
 st=unreal.StepSettings()
 st.enable_ground_collision=True
-st.enable_foot_collision=True
+st.enable_foot_collision=True   # feet are non-overlapping circles -> CollisionRadius spreads the stance
 st.orient_foot_to_ground_pitch=0.4
-st.orient_foot_to_ground_roll=0.4
+st.orient_foot_to_ground_roll=0.3
+# anti-slide + reach (baked from tune_gait.py): feet lift+plant instead of dragging,
+# and can reach onto ramp lips / steps.
+st.step_height=14.0            # was unset/6 -> clear foot lift (kills the drag)
+st.percent_of_stride_in_air=0.45
+st.step_ease_in=0.5
+st.step_ease_out=0.1           # crisp plant on landing
+st.max_collision_height=45.0   # was 30 -> feet reach onto steps/ramp lips
 loco.stepping=st
 ln=ctrl.add_unit_node_with_defaults(loco.static_struct(), loco.export_text(), 'Execute', unreal.Vector2D(-450,0))
 NP=ln.get_node_path()
@@ -64,8 +72,12 @@ ctrl.set_array_pin_size("%s.FootSets"%NP, 4)
 for i,L in enumerate(LEGS):
     ctrl.set_array_pin_size("%s.FootSets.%d.Feet"%(NP,i), 1)
     ctrl.set_pin_default_value('%s.FootSets.%d.Feet.0.AnkleBone'%(NP,i), '(Type=Bone,Name="ankle_%s")'%L)
-    # zero MaxHeelPeel (default Z=50 lifts the foot off the floor)
-    ctrl.set_pin_default_value('%s.FootSets.%d.Feet.0.MaxHeelPeel'%(NP,i), '(X=0.000000,Y=0.000000,Z=0.000000)')
+    # MaxHeelPeel Z restored (zeroing it made the foot stay flat and DRAG = slide;
+    # the historical floating-feet bug was the bone-length scale issue, not heel peel).
+    ctrl.set_pin_default_value('%s.FootSets.%d.Feet.0.MaxHeelPeel'%(NP,i), '(X=0.000000,Y=0.000000,Z=40.000000)')
+    # CollisionRadius 10->28: foot circles push apart via foot-collision, spreading the
+    # clustered "crab" stance into an even ~56x66 machine rectangle (legs at corners).
+    ctrl.set_pin_default_value('%s.FootSets.%d.Feet.0.CollisionRadius'%(NP,i), '28.000000')
     ctrl.set_pin_default_value('%s.FootSets.%d.PhaseOffset'%(NP,i), str(phases[L]))
 ctrl.add_link(begin.find_pin('ExecutePin').get_pin_path(), ln.find_pin('ExecutePin').get_pin_path())
 
