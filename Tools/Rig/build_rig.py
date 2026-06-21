@@ -76,8 +76,11 @@ for i,L in enumerate(LEGS):
     ik=unreal.RigUnit_TwoBoneIKSimplePerItem()
     ik.item_a=bone("hip_"+L); ik.item_b=bone("knee_"+L); ik.effector_item=bone("ankle_"+L)
     ik.primary_axis=knee_g.make_relative(hip_g).translation.normal()
-    ik.item_a_length=knee_g.make_relative(hip_g).translation.length()
-    ik.item_b_length=ankle_g.make_relative(knee_g).translation.length()
+    # NOTE: imported bones carry scale=100 (Blender m->cm baked into bone scale),
+    # so make_relative().length() returns metres (0.32) not cm (32). Compute the
+    # segment lengths from raw world-space translations -> scale-immune, correct cm.
+    ik.item_a_length=(knee_g.translation - hip_g.translation).length()
+    ik.item_b_length=(ankle_g.translation - knee_g.translation).length()
     ik.pole_vector=(knee_g.translation*3 - hip_g.translation - ankle_g.translation).normal()
     ik.pole_vector_kind=unreal.ControlRigVectorKind.LOCATION
     ik.pole_vector_space=EK(type=ET.BONE)
