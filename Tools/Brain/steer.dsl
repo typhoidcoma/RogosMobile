@@ -7,9 +7,14 @@
   ; seek the goal beacon, rotated by the wander offset, flattened + normalized
   (bind seekRaw (Math|Vector|Normalize2D(Vector) (- (Variables|Default|GetSafeZoneLoc) loc) 0.0001))
   (bind seekN (Math|Vector|Normalize2D(Vector) (Math|Vector|RotateVectorAroundAxis seekRaw (* waC (Variables|RobotStats|GetWanderStrength)) (Math|Vector|MakeVector 0.0 0.0 1.0)) 0.0001))
-  (bind inflN (Math|Vector|Normalize2D(Vector) (Variables|Default|GetAccumVec) 0.0001))
+  ; influence/flee are FLATTENED (not normalized) so their magnitude carries the
+  ; distance ramp SenseInfluence now bakes in (strength * (reach-dist)/reach) -> the
+  ; bot drifts toward/away GRADUALLY as a field enters its sense range, full near center.
+  (bind av (Variables|Default|GetAccumVec))
+  (bind inflN (Math|Vector|MakeVector (.x av) (.y av) 0.0))
+  (bind ev (Variables|Default|GetEvadeAwayVec))
   (bind fleeV (select (Variables|Default|GetEvadeFound)
-                (* (Math|Vector|Normalize2D(Vector) (Variables|Default|GetEvadeAwayVec) 0.0001) 2.0)
+                (* (Math|Vector|MakeVector (.x ev) (.y ev) 0.0) 2.5)
                 (Math|Vector|MakeVector 0.0 0.0 0.0)))
   (bind perp (Math|Vector|MakeVector (- (.y seekN)) (.x seekN) 0.0))
   ; sense distance (upgradeable, shrunk by Scramble fields). senseF is FLOAT-ONLY
