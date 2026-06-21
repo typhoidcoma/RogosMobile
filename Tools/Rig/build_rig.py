@@ -20,16 +20,20 @@ LEGS=["FL","FR","BL","BR"]; phases={"FL":0.0,"FR":0.5,"BL":0.5,"BR":0.0}
 for n in list(ctrl.get_graph().get_nodes()):
     try: ctrl.remove_node(n)
     except Exception: pass
-ck=EK(type=ET.CONTROL, name="body_ctrl")
-try:
-    if hier.contains(ck): hc.remove_element(ck)
-except Exception: pass
+for cn in ("body_ctrl","root_ctrl"):
+    ck=EK(type=ET.CONTROL, name=cn)
+    try:
+        if hier.contains(ck): hc.remove_element(ck)
+    except Exception: pass
 
-# ---- body_ctrl control at body bone ----
+# ---- root_ctrl control at the ROOT bone (ground level, z~0) ----
+# The Locomotor's RootControl is its GROUND/floor reference for foot placement,
+# NOT the pelvis. Anchoring it at the root bone keeps feet on the floor; the
+# pelvis (body bone) is handled separately by PelvisSettings.
 st=unreal.RigControlSettings(); st.control_type=unreal.RigControlType.EULER_TRANSFORM
 val=hier.make_control_value_from_euler_transform(unreal.EulerTransform(scale=[1,1,1]))
-bck=hc.add_control("body_ctrl", EK(), st, val, True, True)
-hier.set_control_offset_transform(bck, hier.get_global_transform(bone("body"), True), True)
+bck=hc.add_control("root_ctrl", EK(), st, val, True, True)
+hier.set_control_offset_transform(bck, hier.get_global_transform(bone("root"), True), True)
 
 # ---- BeginExecution ----
 begin=ctrl.add_unit_node_with_defaults(unreal.RigUnit_BeginExecution.static_struct(),
@@ -37,16 +41,29 @@ begin=ctrl.add_unit_node_with_defaults(unreal.RigUnit_BeginExecution.static_stru
 
 # ---- Locomotor ----
 loco=unreal.RigUnit_Locomotor()
-loco.root_control="body_ctrl"
-pv=unreal.PelvisSettings(); pv.pelvis_bone=bone("body"); pv.orient_to_ground_pitch=0.3; pv.orient_to_ground_roll=0.3
+loco.root_control="root_ctrl"
+pv=unreal.PelvisSettings(); pv.pelvis_bone=bone("body")
+pv.orient_to_ground_pitch=0.0; pv.orient_to_ground_roll=0.0   # no ground tilt (flat-ground gait)
 loco.pelvis=pv
-mv=unreal.MovementSettings(); mv.speed_max=80.0; loco.movement=mv
+mv=unreal.MovementSettings()
+mv.speed_min=20.0; mv.speed_max=160.0; mv.minimum_step_length=8.0
+loco.movement=mv
+# keep ground collision ON so feet trace down to the floor (otherwise they park
+# ~13cm below the pelvis and float). Flat ground -> no foot tilt.
+st=unreal.StepSettings()
+st.enable_ground_collision=True
+st.enable_foot_collision=True
+st.orient_foot_to_ground_pitch=0.0
+st.orient_foot_to_ground_roll=0.0
+loco.stepping=st
 ln=ctrl.add_unit_node_with_defaults(loco.static_struct(), loco.export_text(), 'Execute', unreal.Vector2D(-450,0))
 NP=ln.get_node_path()
 ctrl.set_array_pin_size("%s.FootSets"%NP, 4)
 for i,L in enumerate(LEGS):
     ctrl.set_array_pin_size("%s.FootSets.%d.Feet"%(NP,i), 1)
     ctrl.set_pin_default_value('%s.FootSets.%d.Feet.0.AnkleBone'%(NP,i), '(Type=Bone,Name="ankle_%s")'%L)
+    # zero MaxHeelPeel (default Z=50 lifts the foot off the floor)
+    ctrl.set_pin_default_value('%s.FootSets.%d.Feet.0.MaxHeelPeel'%(NP,i), '(X=0.000000,Y=0.000000,Z=0.000000)')
     ctrl.set_pin_default_value('%s.FootSets.%d.PhaseOffset'%(NP,i), str(phases[L]))
 ctrl.add_link(begin.find_pin('ExecutePin').get_pin_path(), ln.find_pin('ExecutePin').get_pin_path())
 
