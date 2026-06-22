@@ -21,8 +21,7 @@ FRigUnit_RogoGait_Execute()
 	}
 
 	// Read the body's actual velocity from the owning actor (the capsule is driven by the
-	// BP). Direction + speed both come from here -> no BP->CR plumbing. Speed sets the
-	// effective cadence below, so it must be read before advancing the phase.
+	// BP). Direction + speed both come from here -> no BP->CR plumbing.
 	FVector Velocity = FVector::ZeroVector;
 	if (const USceneComponent* OwningComp = ExecuteContext.GetOwningComponent())
 	{
@@ -38,11 +37,9 @@ FRigUnit_RogoGait_Execute()
 		Move = FVector::ForwardVector;
 	}
 
-	// STATELESS gait. RigVM WorkData does not persist across ticks in this AnimBP-hosted
-	// CR (an accumulated phase / per-leg plant anchor both froze), so everything is
-	// derived from the current frame only: phase from absolute time, foot offset from a
-	// closed-form world-lock. Cadence is therefore fixed at Frequency (speed-scaled
-	// cadence needs an integrated phase = persistent state, unavailable here).
+	// STATELESS gait. This AnimBP-hosted CR re-inits on any hierarchy mutation and RigVM
+	// WorkData doesn't persist, so phase comes straight from absolute time and the foot
+	// offset from a closed-form world-lock (exact for straight motion).
 	const float Freq = FMath::Max(Frequency, KINDA_SMALL_NUMBER);
 	const float Phase = FMath::Frac(ExecuteContext.GetAbsoluteTime() * Freq);
 
@@ -50,8 +47,9 @@ FRigUnit_RogoGait_Execute()
 	const float Stance = FMath::Clamp(StanceFraction, 0.05f, 0.95f);
 	// Along-move amplitude that keeps a planted foot world-fixed for STRAIGHT motion: the
 	// foot's body-local offset slides +Amp -> -Amp over stance, i.e. backward by exactly
-	// the body's advance (Stance*Stride). (Turning still slides the foot some — the lock
-	// uses the current heading, and a true turn-proof lock would need plant-time state.)
+	// the body's advance (Stance*Stride). (Turning slides the foot some — the lock uses
+	// the current heading, and a turn-proof lock would need persistent plant-time state,
+	// which isn't available in this hosting setup.)
 	const float Amp = Stance * Stride * 0.5f;
 
 	FeetTransforms.SetNum(NumLegs);
