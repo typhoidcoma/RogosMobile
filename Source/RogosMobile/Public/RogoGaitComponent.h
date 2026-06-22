@@ -46,6 +46,11 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RogoGait")
 	float BodyBob = 6.f;
 
+	/** Constant vertical offset applied to the body (cm). Negative = crouch: lowers the body
+	 *  so the legs fold and the knees rise (spider posture); feet stay grounded. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RogoGait")
+	float BodyHeightOffset = -15.f;
+
 	/** Distance the resting foot sits below its hip (cm). */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RogoGait")
 	float RestDrop = 53.f;

@@ -161,8 +161,9 @@ void URogoGaitComponent::TickComponent(float DeltaTime, ELevelTick TickType, FAc
 		PrevLegPhase[i] = LegPhase;
 	}
 
-	// Body bob: dips at the two stance midpoints per cycle (diagonal trot).
-	BodyBobZ = -BodyBob * (0.5f - 0.5f * FMath::Cos(Phase * 2.f * PI * 2.f));
+	// Body height: constant crouch (BodyHeightOffset, lowers the body so legs fold = spider)
+	// plus the per-cycle bob that dips at the two stance midpoints (diagonal trot).
+	BodyBobZ = BodyHeightOffset - BodyBob * (0.5f - 0.5f * FMath::Cos(Phase * 2.f * PI * 2.f));
 }
 
 void URogoGaitComponent::ApplyLegDebugColors()

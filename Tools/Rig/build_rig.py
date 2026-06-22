@@ -75,12 +75,14 @@ for i,L in enumerate(LEGS):
     # bones carry scale=100 -> compute segment lengths from world translations (scale-immune).
     ik.item_a_length=(knee_g.translation - hip_g.translation).length()
     ik.item_b_length=(ankle_g.translation - knee_g.translation).length()
-    # Crab posture: the knee bulges OUTWARD (away from body center) + slightly UP, so the
-    # upper leg angles down-and-out and the lower leg drops to the foot (AX-9 leg mechanism).
+    # SPIDER posture: the knee rises HIGH (the leg's apex above the hip/foot line), bulging
+    # up + outward, so the upper leg angles UP-and-out to a raised knee then the lower leg
+    # drops to the foot. KNEE_UP dominates KNEE_OUT to lift the knee like a spider/insect.
+    KNEE_UP=1.1; KNEE_OUT=0.9
     bc=hier.get_global_transform(bone("body"), True).translation
     out=unreal.Vector(hip_g.translation.x-bc.x, hip_g.translation.y-bc.y, 0.0)
     out = out.normal() if out.length()>1e-4 else unreal.Vector(1.0,0.0,0.0)
-    ik.pole_vector=unreal.Vector(out.x, out.y, 0.6).normal()
+    ik.pole_vector=unreal.Vector(out.x*KNEE_OUT, out.y*KNEE_OUT, KNEE_UP).normal()
     ik.pole_vector_kind=unreal.ControlRigVectorKind.DIRECTION
     ik.pole_vector_space=EK()
     ik.secondary_axis_weight=0.0
