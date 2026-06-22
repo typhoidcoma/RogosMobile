@@ -135,22 +135,41 @@ void URogoGaitComponent::TickComponent(float DeltaTime, ELevelTick TickType, FAc
 	TArray<FVector> FootGround;            // per-foot ground point (no lift) for the slope plane
 	FootGround.SetNum(NumLegs);
 
-	// Ground Z under a foot XY (the real surface, for slopes). Falls back to the flat foot
-	// height when disabled or nothing is hit. Same trace channel as the steering probes.
+	// Ground probe under a foot XY: surface Z + whether it's a usable foothold (hit + not too
+	// steep). Same trace channel as the steering probes; ignores self.
 	UWorld* World = GetWorld();
 	AActor* OwnerNC = GetOwner();
-	auto GroundZ = [&](const FVector& AtXY, float FlatZ) -> float
+	const float FootWalkableZ = FMath::Cos(FMath::DegreesToRadians(FMath::Clamp(FootMaxAngleDeg, 5.f, 89.f)));
+	struct FGroundProbe { bool bValid; float Z; };
+	auto Probe = [&](float X, float Y, float FlatZ) -> FGroundProbe
 	{
-		if (!bGroundTrace || World == nullptr) { return FlatZ; }
-		const FVector Start(AtXY.X, AtXY.Y, FlatZ + GroundTraceUp);
-		const FVector End(AtXY.X, AtXY.Y, FlatZ - GroundTraceDown);
+		if (!bGroundTrace || World == nullptr) { return { true, FlatZ }; }   // trace off -> flat is fine
+		const FVector Start(X, Y, FlatZ + GroundTraceUp);
+		const FVector End(X, Y, FlatZ - GroundTraceDown);
 		FHitResult Hit;
 		TArray<AActor*> Ignore;
 		if (OwnerNC) { Ignore.Add(OwnerNC); }
-		const bool bHit = UKismetSystemLibrary::LineTraceSingle(
-			World, Start, End, ETraceTypeQuery::TraceTypeQuery1, false, Ignore,
-			EDrawDebugTrace::None, Hit, true);
-		return bHit ? Hit.Location.Z + FootGroundOffset : FlatZ;
+		if (UKismetSystemLibrary::LineTraceSingle(World, Start, End, ETraceTypeQuery::TraceTypeQuery1,
+			false, Ignore, EDrawDebugTrace::None, Hit, true))
+		{
+			return { (Hit.ImpactNormal.Z >= FootWalkableZ), (float)(Hit.Location.Z + FootGroundOffset) };
+		}
+		return { false, FlatZ };   // miss = gap/cliff -> not a foothold
+	};
+
+	// Find solid ground for a foot: try the desired spot, else pull inward toward the hip.
+	auto FindFoothold = [&](const FVector& Desired, const FVector& Hip) -> FVector
+	{
+		const FGroundProbe d = Probe(Desired.X, Desired.Y, Hip.Z);
+		if (!bFootholdCheck || d.bValid) { return FVector(Desired.X, Desired.Y, d.Z); }
+		for (float Pull = 0.34f; Pull <= 1.001f; Pull += 0.33f)   // 0.34, 0.67, 1.0 toward the hip
+		{
+			const float X = FMath::Lerp(Desired.X, Hip.X, Pull);
+			const float Y = FMath::Lerp(Desired.Y, Hip.Y, Pull);
+			const FGroundProbe p = Probe(X, Y, Hip.Z);
+			if (p.bValid) { return FVector(X, Y, p.Z); }
+		}
+		return FVector(Hip.X, Hip.Y, Hip.Z);   // nothing solid -> least-bad: under the hip, flat height
 	};
 
 	for (int32 i = 0; i < NumLegs; ++i)
@@ -167,30 +186,34 @@ void URogoGaitComponent::TickComponent(float DeltaTime, ELevelTick TickType, FAc
 		const float LegPhase = FMath::Frac(Phase + Off);
 		const bool bStance = LegPhase < Stance;
 
-		// Next plant: under the hip, led forward by Amp; Z snapped onto the ground there.
-		FVector PlantTarget = Home + Move * Amp;
-		PlantTarget.Z = GroundZ(PlantTarget, Home.Z);
+		// Next plant: under the hip, led forward by Amp, on a validated foothold (gaps/edges/
+		// too-steep spots are pulled in toward the hip until solid ground is found).
+		const FVector Landing = FindFoothold(Home + Move * Amp, Home);
 
 		// Touchdown = swing->stance transition (phase wrapped past 1.0 into [0,Stance)).
 		const bool bJustLanded = (PrevLegPhase[i] >= Stance) && bStance;
 		if (bJustLanded || PlantAnchors[i].IsNearlyZero())
 		{
-			PlantAnchors[i] = PlantTarget;   // capture world spot + its ground height, held through stance
+			PlantAnchors[i] = Landing;   // capture the solid spot, held through stance
 		}
 
 		FVector Foot;
 		float SurfaceZ;
 		if (bStance)
 		{
-			Foot = PlantAnchors[i];     // held world anchor (incl. slope Z) -> turn-proof + grounded
+			Foot = PlantAnchors[i];     // held world anchor (incl. terrain Z) -> turn-proof + grounded
 			SurfaceZ = Foot.Z;
 		}
 		else
 		{
 			const float s = (LegPhase - Stance) / (1.f - Stance);
-			Foot = FMath::Lerp(PlantAnchors[i], PlantTarget, s);
-			SurfaceZ = GroundZ(Foot, Home.Z);
-			Foot.Z = SurfaceZ + FMath::Sin(s * PI) * EffStepHeight;   // arc above the surface
+			const FVector LiftOff = PlantAnchors[i];
+			Foot.X = FMath::Lerp(LiftOff.X, Landing.X, s);
+			Foot.Y = FMath::Lerp(LiftOff.Y, Landing.Y, s);
+			SurfaceZ = FMath::Lerp(LiftOff.Z, Landing.Z, s);          // arc base follows the ground
+			const float StepUp = FMath::Max(0.f, Landing.Z - LiftOff.Z);
+			const float Arc = EffStepHeight + StepOverGain * StepUp;  // clear a ledge edge
+			Foot.Z = SurfaceZ + FMath::Sin(s * PI) * Arc;
 		}
 
 		FeetTargetsWorld[i] = FTransform(Foot);

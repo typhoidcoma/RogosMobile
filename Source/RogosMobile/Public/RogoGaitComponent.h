@@ -79,6 +79,20 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RogoGait|Ground")
 	float FootGroundOffset = 0.f;
 
+	/** Validate footholds: if a foot would land on a gap, edge, cliff, or too-steep face,
+	 *  pull it inward toward the hip to find solid ground instead. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RogoGait|Ground")
+	bool bFootholdCheck = true;
+
+	/** Steepest surface (deg) still accepted as a foothold; steeper = rejected, foot pulls in. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RogoGait|Ground")
+	float FootMaxAngleDeg = 50.f;
+
+	/** Extra swing lift per cm of step-up height, so the foot clears a ledge edge and lands
+	 *  on top (reach onto steps). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RogoGait|Ground")
+	float StepOverGain = 0.6f;
+
 	/** Tilt the body to match the slope under the feet (pitch/roll), so it leans into hills
 	 *  instead of staying flat. Also equalises leg reach on grades. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RogoGait|Ground")
