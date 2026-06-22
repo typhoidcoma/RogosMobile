@@ -20,7 +20,9 @@ LEGS=["FL","FR","BL","BR"]; phases={"FL":0.0,"FR":0.5,"BL":0.5,"BR":0.0}
 for n in list(ctrl.get_graph().get_nodes()):
     try: ctrl.remove_node(n)
     except Exception: pass
-for cn in ("body_ctrl","root_ctrl"):
+# Clear legacy controls (older builds used root_ctrl / per-leg plant_* scratch controls;
+# the gait is stateless now and needs none).
+for cn in ("body_ctrl","root_ctrl")+tuple("plant_%s"%L for L in LEGS):
     ck=EK(type=ET.CONTROL, name=cn)
     try:
         if hier.contains(ck): hc.remove_element(ck)
@@ -40,7 +42,6 @@ gait=unreal.RigUnit_RogoGait()
 gn=ctrl.add_unit_node_with_defaults(gait.static_struct(), gait.export_text(), 'Execute', unreal.Vector2D(-450,0))
 GP=gn.get_node_path()
 ctrl.set_pin_default_value("%s.Frequency"%GP, "1.5")
-ctrl.set_pin_default_value("%s.CadenceGain"%GP, "0.01")
 ctrl.set_pin_default_value("%s.StanceFraction"%GP, "0.6")
 ctrl.set_pin_default_value("%s.StepHeight"%GP, "14.0")
 ctrl.set_pin_default_value("%s.BodyBob"%GP, "6.0")
