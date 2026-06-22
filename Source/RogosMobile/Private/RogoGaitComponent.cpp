@@ -1,6 +1,7 @@
 #include "RogoGaitComponent.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "GameFramework/Actor.h"
+#include "Kismet/KismetSystemLibrary.h"
 #include "Engine/SkeletalMesh.h"
 #include "Rendering/SkeletalMeshRenderData.h"
 #include "Rendering/SkeletalMeshLODRenderData.h"
@@ -120,6 +121,24 @@ void URogoGaitComponent::TickComponent(float DeltaTime, ELevelTick TickType, FAc
 	if (PrevLegPhase.Num() != NumLegs) { PrevLegPhase.SetNumZeroed(NumLegs); }
 	FeetTargetsWorld.SetNum(NumLegs);
 
+	// Ground Z under a foot XY (the real surface, for slopes). Falls back to the flat foot
+	// height when disabled or nothing is hit. Same trace channel as the steering probes.
+	UWorld* World = GetWorld();
+	AActor* OwnerNC = GetOwner();
+	auto GroundZ = [&](const FVector& AtXY, float FlatZ) -> float
+	{
+		if (!bGroundTrace || World == nullptr) { return FlatZ; }
+		const FVector Start(AtXY.X, AtXY.Y, FlatZ + GroundTraceUp);
+		const FVector End(AtXY.X, AtXY.Y, FlatZ - GroundTraceDown);
+		FHitResult Hit;
+		TArray<AActor*> Ignore;
+		if (OwnerNC) { Ignore.Add(OwnerNC); }
+		const bool bHit = UKismetSystemLibrary::LineTraceSingle(
+			World, Start, End, ETraceTypeQuery::TraceTypeQuery1, false, Ignore,
+			EDrawDebugTrace::None, Hit, true);
+		return bHit ? Hit.Location.Z + FootGroundOffset : FlatZ;
+	};
+
 	for (int32 i = 0; i < NumLegs; ++i)
 	{
 		// Splay the footprint outward (crab stance) by scaling the hip's lateral+longitudinal
@@ -134,27 +153,27 @@ void URogoGaitComponent::TickComponent(float DeltaTime, ELevelTick TickType, FAc
 		const float LegPhase = FMath::Frac(Phase + Off);
 		const bool bStance = LegPhase < Stance;
 
-		// Next plant: under the hip, led forward by Amp.
-		const FVector PlantTarget = Home + Move * Amp;
+		// Next plant: under the hip, led forward by Amp; Z snapped onto the ground there.
+		FVector PlantTarget = Home + Move * Amp;
+		PlantTarget.Z = GroundZ(PlantTarget, Home.Z);
 
 		// Touchdown = swing->stance transition (phase wrapped past 1.0 into [0,Stance)).
 		const bool bJustLanded = (PrevLegPhase[i] >= Stance) && bStance;
 		if (bJustLanded || PlantAnchors[i].IsNearlyZero())
 		{
-			PlantAnchors[i] = PlantTarget;
+			PlantAnchors[i] = PlantTarget;   // capture world spot + its ground height, held through stance
 		}
 
 		FVector Foot;
 		if (bStance)
 		{
-			Foot = PlantAnchors[i];     // held world anchor -> turn-proof
-			Foot.Z = Home.Z;
+			Foot = PlantAnchors[i];     // held world anchor (incl. slope Z) -> turn-proof + grounded
 		}
 		else
 		{
 			const float s = (LegPhase - Stance) / (1.f - Stance);
 			Foot = FMath::Lerp(PlantAnchors[i], PlantTarget, s);
-			Foot.Z = Home.Z + FMath::Sin(s * PI) * StepHeight;
+			Foot.Z = GroundZ(Foot, Home.Z) + FMath::Sin(s * PI) * StepHeight;   // arc above the surface
 		}
 
 		FeetTargetsWorld[i] = FTransform(Foot);

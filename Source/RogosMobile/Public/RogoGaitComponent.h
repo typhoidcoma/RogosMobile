@@ -60,6 +60,25 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RogoGait")
 	float StanceScale = 1.5f;
 
+	// --- Ground tracing: plant feet on the real surface (slopes/ramps) instead of a flat Z. ---
+
+	/** Trace each foot down onto the ground so it follows terrain. Off = flat-ground gait. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RogoGait|Ground")
+	bool bGroundTrace = true;
+
+	/** How far above the flat foot height the ground trace starts (cm). Keep modest: too high
+	 *  over-grabs onto overhead ledges on cluttered geometry. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RogoGait|Ground")
+	float GroundTraceUp = 30.f;
+
+	/** How far below the flat foot height the ground trace reaches (cm). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RogoGait|Ground")
+	float GroundTraceDown = 80.f;
+
+	/** Lift planted feet this far off the traced surface (cm). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RogoGait|Ground")
+	float FootGroundOffset = 0.f;
+
 	/** Hip bones, one per leg (FL, FR, BL, BR). */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RogoGait")
 	TArray<FName> HipBones;

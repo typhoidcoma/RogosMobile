@@ -33,22 +33,32 @@
   (bind tB (Math|Vector|MakeVector (.y wn) (- (.x wn)) 0.0))
   (bind dotA (+ (* (.x seekN) (.x tA)) (* (.y seekN) (.y tA))))
   (bind wallTurn (select (> dotA 0.0) tA tB))
-  ; RISE probe: ground stepped up ahead (a ramp) -> treat as obstacle, turn rather than climb
+  ; RISE probe: ground stepped up ahead. Only avoid it if it's too STEEP to walk (a wall/cliff) --
+  ; walkable slopes/ramps should be climbed, not dodged. Judge by the surface normal, not height.
   (bind ahead (+ loc (* seekN (* 0.8 (* (Variables|RobotStats|GetSenseRange) (Variables|RobotStats|GetScrambleFactor))))))
   (bind (ro riseHitB) (Collision|LineTraceByChannel :Start (+ ahead (Math|Vector|MakeVector 0.0 0.0 120.0)) :End (+ ahead (Math|Vector|MakeVector 0.0 0.0 -260.0)) :TraceChannel "TraceTypeQuery1" :bIgnoreSelf true))
-  (bind (r1 r2 r3 r4 r5 ript) (Collision|BreakHitResult ro))
-  (bind riseW (select (and riseHitB (> (.z ript) (- (.z loc) 14.0))) 1.0 0.0))
+  (bind (r1 r2 r3 r4 r5 ript r7 riseN) (Collision|BreakHitResult ro))
+  ; fire only when stepped up AND steep: normal.z < 0.64 ~= steeper than ~50 deg (unwalkable).
+  ; walkable ramps (normal.z >= 0.64) pass through -> the bot climbs them.
+  (bind riseW (select (and riseHitB (and (> (.z ript) (- (.z loc) 14.0)) (< (.z riseN) 0.64))) 1.0 0.0))
   ; how strongly blocked + which way to turn (wall slide, else perpendicular for ramps)
   (bind avoidS (select (> wallClose riseW) wallClose riseW))
   (bind desiredTurn (select wallHit wallTurn perp))
-  (bind blocked (> avoidS 0.35))
+  (bind blocked (> avoidS 0.15))
   ; commit the turn side while blocked (hold -> a clean 90 deg, no flip-flop), clear when free
   (bind oldTurn (Variables|Default|GetTurnDir))
   (bind committed (> (Math|Vector|VectorLength oldTurn) 0.5))
   (bind newTurn (select blocked (select committed oldTurn desiredTurn) (Math|Vector|MakeVector 0.0 0.0 0.0)))
   (Variables|Default|SetTurnDir newTurn)
-  ; BLOCKED -> hard turn along the wall (drop the into-wall seek) + a small push off the wall so it doesn't stick.
+  ; CONTACT ESCAPE: if the BODY is actually against the wall (whisker hit within ~the capsule
+  ; radius) and the tangent slide isn't freeing it, steer a RANDOM direction away from the wall
+  ; surface (impact normal wn rotated by a random angle) so it unsticks and keeps moving.
+  (bind pinned (and wallHit (< wdist 60.0)))
+  (bind escAng (Math|Random|RandomFloatinRange -60.0 60.0))
+  (bind escape (Math|Vector|Normalize2D(Vector) (Math|Vector|RotateVectorAroundAxis wn escAng (Math|Vector|MakeVector 0.0 0.0 1.0)) 0.0001))
+  ; PINNED -> random escape away from the wall.
+  ; BLOCKED -> hard turn along the wall (drop the into-wall seek) + a small push off the wall.
   ; CLEAR  -> seek the goal. influence + flee always apply.
-  (bind moveCore (select blocked (+ newTurn (* wn 0.25)) seekN))
+  (bind moveCore (select pinned escape (select blocked (+ newTurn (* wn 0.25)) seekN)))
   (bind steer (Math|Vector|Normalize2D(Vector) (+ (+ moveCore inflN) fleeV) 0.0001))
   (Pawn|Input|AddMovementInput :self self :WorldDirection steer :ScaleValue 1.0))
