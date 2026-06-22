@@ -20,12 +20,9 @@ FRigUnit_RogoGait_Execute()
 		return;
 	}
 
-	// Gait phase from the rig's absolute time (stateless -> no reliance on instance
-	// state persistence). Cadence (Frequency) is the driver of the leg cycle.
-	const float Phase = FMath::Frac(ExecuteContext.GetAbsoluteTime() * Frequency);
-
-	// Read the body's actual velocity from the owning actor (the BP drives the capsule
-	// at Frequency*stride). Direction + speed both come from here -> no BP->CR plumbing.
+	// Read the body's actual velocity from the owning actor (the capsule is driven by the
+	// BP). Direction + speed both come from here -> no BP->CR plumbing. Speed sets the
+	// effective cadence below, so it must be read before advancing the phase.
 	FVector Velocity = FVector::ZeroVector;
 	if (const USceneComponent* OwningComp = ExecuteContext.GetOwningComponent())
 	{
@@ -41,11 +38,20 @@ FRigUnit_RogoGait_Execute()
 		Move = FVector::ForwardVector;
 	}
 
+	// STATELESS gait. RigVM WorkData does not persist across ticks in this AnimBP-hosted
+	// CR (an accumulated phase / per-leg plant anchor both froze), so everything is
+	// derived from the current frame only: phase from absolute time, foot offset from a
+	// closed-form world-lock. Cadence is therefore fixed at Frequency (speed-scaled
+	// cadence needs an integrated phase = persistent state, unavailable here).
 	const float Freq = FMath::Max(Frequency, KINDA_SMALL_NUMBER);
+	const float Phase = FMath::Frac(ExecuteContext.GetAbsoluteTime() * Freq);
+
 	const float Stride = Speed / Freq;                          // distance travelled per cycle
 	const float Stance = FMath::Clamp(StanceFraction, 0.05f, 0.95f);
-	// Body-local along-move amplitude that keeps a planted foot world-fixed: the foot
-	// slides backward by (Stance * Stride) over the stance phase = body advance over stance.
+	// Along-move amplitude that keeps a planted foot world-fixed for STRAIGHT motion: the
+	// foot's body-local offset slides +Amp -> -Amp over stance, i.e. backward by exactly
+	// the body's advance (Stance*Stride). (Turning still slides the foot some — the lock
+	// uses the current heading, and a true turn-proof lock would need plant-time state.)
 	const float Amp = Stance * Stride * 0.5f;
 
 	FeetTransforms.SetNum(NumLegs);
@@ -62,13 +68,13 @@ FRigUnit_RogoGait_Execute()
 		float Lift = 0.f;
 		if (LegPhase < Stance)
 		{
-			// Stance: world-locked — body-local offset slides +Amp -> -Amp.
+			// Stance: world-locked (straight) — body-local offset slides +Amp -> -Amp.
 			const float s = LegPhase / Stance;                  // 0..1
 			Along = Amp * (1.f - 2.f * s);
 		}
 		else
 		{
-			// Swing: reach back forward -Amp -> +Amp with a sine lift arc.
+			// Swing: reach forward -Amp -> +Amp with a sine lift arc.
 			const float s = (LegPhase - Stance) / (1.f - Stance); // 0..1
 			Along = Amp * (2.f * s - 1.f);
 			Lift = FMath::Sin(s * PI) * StepHeight;

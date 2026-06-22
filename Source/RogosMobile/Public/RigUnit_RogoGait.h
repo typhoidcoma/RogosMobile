@@ -4,7 +4,11 @@
 #include "Units/RigUnit.h"
 #include "RigUnit_RogoGait.generated.h"
 
-/** Persistent gait phase across ticks (RigVM instance state). */
+/** Intended as cross-tick gait state, but RigVM WorkData does NOT persist between ticks
+ *  in this AnimBP-hosted Control Rig (both an accumulated phase and per-leg plant anchors
+ *  froze in testing). The gait is therefore fully stateless and these fields are currently
+ *  UNUSED — kept only to hold the struct layout until a control/curve-based state
+ *  mechanism replaces them. */
 USTRUCT()
 struct FRigUnit_RogoGait_WorkData
 {
@@ -12,6 +16,19 @@ struct FRigUnit_RogoGait_WorkData
 
 	UPROPERTY()
 	float Phase = 0.f;
+
+	/** Last AbsoluteTime seen, for dt integration. <0 = uninitialised. */
+	UPROPERTY()
+	float LastTime = -1.f;
+
+	/** Per-leg world-space plant anchor: where the foot touched down. Held fixed in
+	 *  world space through the whole stance so turning the body doesn't drag the foot. */
+	UPROPERTY()
+	TArray<FVector> PlantPos;
+
+	/** Per-leg leg-phase from the previous tick, to detect the swing->stance touchdown. */
+	UPROPERTY()
+	TArray<float> PrevLegPhase;
 };
 
 /**
@@ -41,9 +58,16 @@ struct ROGOSMOBILE_API FRigUnit_RogoGait : public FRigUnitMutable
 	// pin wiring is needed. The BP drives the capsule at Frequency*stride; the gait
 	// reads the resulting velocity and world-locks the feet to it.
 
-	/** Gait cadence (cycles/sec) — the leg step frequency that drives the pace. */
+	/** Base gait cadence at zero speed (cycles/sec) — the idle leg step frequency. */
 	UPROPERTY(meta = (Input))
 	float Frequency = 1.5f;
+
+	/** RESERVED / currently INERT. Intended to scale cadence with speed
+	 *  (Frequency + CadenceGain*Speed), but that needs an integrated phase = persistent
+	 *  per-tick state, and RigVM WorkData does not persist in this AnimBP-hosted CR.
+	 *  Kept as a pin pending a control/curve-based state mechanism. */
+	UPROPERTY(meta = (Input))
+	float CadenceGain = 0.01f;
 
 	/** Fraction of a cycle a foot is planted (0..1). */
 	UPROPERTY(meta = (Input))
