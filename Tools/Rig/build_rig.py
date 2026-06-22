@@ -37,21 +37,18 @@ REST_DROP=hipZ-ankZ
 begin=ctrl.add_unit_node_with_defaults(unreal.RigUnit_BeginExecution.static_struct(),
         unreal.RigUnit_BeginExecution().export_text(), 'Execute', unreal.Vector2D(-700,0))
 
-# ---- RogoGait (custom C++ gait) ----
+# ---- RogoGait (thin IK-target provider; reads URogoGaitComponent on the pawn) ----
+# The stateful gait runs on the pawn component; this node converts its world foot targets
+# to rig space + applies the body bob. Only fallback/sizing pins remain on the node
+# (Hips, RestDrop, BodyBone) -- cadence/stance/step/offsets all live on the component.
 gait=unreal.RigUnit_RogoGait()
 gn=ctrl.add_unit_node_with_defaults(gait.static_struct(), gait.export_text(), 'Execute', unreal.Vector2D(-450,0))
 GP=gn.get_node_path()
-ctrl.set_pin_default_value("%s.Frequency"%GP, "1.5")
-ctrl.set_pin_default_value("%s.StanceFraction"%GP, "0.6")
-ctrl.set_pin_default_value("%s.StepHeight"%GP, "14.0")
-ctrl.set_pin_default_value("%s.BodyBob"%GP, "6.0")
 ctrl.set_pin_default_value("%s.RestDrop"%GP, str(REST_DROP))
 ctrl.set_pin_default_value("%s.BodyBone"%GP, '(Type=Bone,Name="body")')
 ctrl.set_array_pin_size("%s.Hips"%GP, 4)
-ctrl.set_array_pin_size("%s.PhaseOffsets"%GP, 4)
 for i,L in enumerate(LEGS):
     ctrl.set_pin_default_value('%s.Hips.%d'%(GP,i), '(Type=Bone,Name="hip_%s")'%L)
-    ctrl.set_pin_default_value('%s.PhaseOffsets.%d'%(GP,i), str(phases[L]))
 ctrl.add_link(begin.find_pin('ExecutePin').get_pin_path(), gn.find_pin('ExecutePin').get_pin_path())
 
 # ---- body bob: SetTransform(body) <- RogoGait.BodyTransform (global) ----
@@ -78,9 +75,14 @@ for i,L in enumerate(LEGS):
     # bones carry scale=100 -> compute segment lengths from world translations (scale-immune).
     ik.item_a_length=(knee_g.translation - hip_g.translation).length()
     ik.item_b_length=(ankle_g.translation - knee_g.translation).length()
-    ik.pole_vector=(knee_g.translation*3 - hip_g.translation - ankle_g.translation).normal()
-    ik.pole_vector_kind=unreal.ControlRigVectorKind.LOCATION
-    ik.pole_vector_space=EK(type=ET.BONE)
+    # Crab posture: the knee bulges OUTWARD (away from body center) + slightly UP, so the
+    # upper leg angles down-and-out and the lower leg drops to the foot (AX-9 leg mechanism).
+    bc=hier.get_global_transform(bone("body"), True).translation
+    out=unreal.Vector(hip_g.translation.x-bc.x, hip_g.translation.y-bc.y, 0.0)
+    out = out.normal() if out.length()>1e-4 else unreal.Vector(1.0,0.0,0.0)
+    ik.pole_vector=unreal.Vector(out.x, out.y, 0.6).normal()
+    ik.pole_vector_kind=unreal.ControlRigVectorKind.DIRECTION
+    ik.pole_vector_space=EK()
     ik.secondary_axis_weight=0.0
     ik.effector=ankle_g
     ikn=ctrl.add_unit_node_with_defaults(ik.static_struct(), ik.export_text(), 'Execute', unreal.Vector2D(-150, i*180-270))
