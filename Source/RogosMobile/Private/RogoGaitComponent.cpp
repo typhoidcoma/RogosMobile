@@ -1,6 +1,10 @@
 #include "RogoGaitComponent.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "GameFramework/Actor.h"
+#include "Engine/SkeletalMesh.h"
+#include "Rendering/SkeletalMeshRenderData.h"
+#include "Rendering/SkeletalMeshLODRenderData.h"
+#include "Rendering/SkinWeightVertexBuffer.h"
 
 URogoGaitComponent::URogoGaitComponent()
 {
@@ -10,12 +14,24 @@ URogoGaitComponent::URogoGaitComponent()
 	// Defaults for the RogoBot skeleton: diagonal trot.
 	HipBones = { TEXT("hip_FL"), TEXT("hip_FR"), TEXT("hip_BL"), TEXT("hip_BR") };
 	PhaseOffsets = { 0.f, 0.5f, 0.5f, 0.f };
+
+	// Debug per-leg colors (FL red, FR green, BL blue, BR yellow).
+	LegColors = {
+		FLinearColor(1.f, 0.05f, 0.05f, 1.f),
+		FLinearColor(0.05f, 1.f, 0.05f, 1.f),
+		FLinearColor(0.1f, 0.3f, 1.f, 1.f),
+		FLinearColor(1.f, 0.9f, 0.05f, 1.f)
+	};
 }
 
 void URogoGaitComponent::BeginPlay()
 {
 	Super::BeginPlay();
 	SampleRestLayout();
+	if (bDebugLegColors)
+	{
+		ApplyLegDebugColors();
+	}
 }
 
 void URogoGaitComponent::SampleRestLayout()
@@ -147,4 +163,69 @@ void URogoGaitComponent::TickComponent(float DeltaTime, ELevelTick TickType, FAc
 
 	// Body bob: dips at the two stance midpoints per cycle (diagonal trot).
 	BodyBobZ = -BodyBob * (0.5f - 0.5f * FMath::Cos(Phase * 2.f * PI * 2.f));
+}
+
+void URogoGaitComponent::ApplyLegDebugColors()
+{
+	AActor* Owner = GetOwner();
+	if (Owner == nullptr) { return; }
+	USkeletalMeshComponent* Mesh = Owner->FindComponentByClass<USkeletalMeshComponent>();
+	if (Mesh == nullptr) { return; }
+	USkeletalMesh* Asset = Mesh->GetSkeletalMeshAsset();
+	if (Asset == nullptr) { return; }
+	FSkeletalMeshRenderData* RD = Asset->GetResourceForRendering();
+	if (RD == nullptr || RD->LODRenderData.Num() == 0) { return; }
+
+	FSkeletalMeshLODRenderData& LOD = RD->LODRenderData[0];
+	const FSkinWeightVertexBuffer* SWB = LOD.GetSkinWeightVertexBuffer();
+	const int32 NumVerts = LOD.GetNumVertices();
+	if (SWB == nullptr || NumVerts == 0) { return; }
+	const FReferenceSkeleton& RefSkel = Asset->GetRefSkeleton();
+	const int32 MaxInf = (int32)SWB->GetMaxBoneInfluences();
+
+	auto LegFromBone = [](const FName& Bone) -> int32
+	{
+		const FString S = Bone.ToString();
+		if (S.EndsWith(TEXT("_FL"))) { return 0; }
+		if (S.EndsWith(TEXT("_FR"))) { return 1; }
+		if (S.EndsWith(TEXT("_BL"))) { return 2; }
+		if (S.EndsWith(TEXT("_BR"))) { return 3; }
+		return INDEX_NONE;
+	};
+
+	TArray<FColor> Colors;
+	Colors.Init(BodyColor.ToFColor(false), NumVerts);
+
+	for (const FSkelMeshRenderSection& Section : LOD.RenderSections)
+	{
+		for (uint32 v = 0; v < Section.NumVertices; ++v)
+		{
+			const int32 GlobalV = Section.BaseVertexIndex + v;
+
+			// Dominant influence for this vertex.
+			int32 BestInf = 0;
+			uint16 BestW = 0;
+			for (int32 inf = 0; inf < MaxInf; ++inf)
+			{
+				const uint16 W = SWB->GetBoneWeight(GlobalV, inf);
+				if (W > BestW) { BestW = W; BestInf = inf; }
+			}
+			const int32 LocalBone = SWB->GetBoneIndex(GlobalV, BestInf);
+			if (!Section.BoneMap.IsValidIndex(LocalBone)) { continue; }
+			const FName BoneName = RefSkel.GetBoneName(Section.BoneMap[LocalBone]);
+
+			const int32 Leg = LegFromBone(BoneName);
+			if (Leg != INDEX_NONE && LegColors.IsValidIndex(Leg))
+			{
+				Colors[GlobalV] = LegColors[Leg].ToFColor(false);
+			}
+		}
+	}
+
+	CachedSlot0Material = Mesh->GetMaterial(0);
+	Mesh->SetVertexColorOverride(0, Colors);
+	if (DebugMaterial)
+	{
+		Mesh->SetMaterial(0, DebugMaterial);
+	}
 }

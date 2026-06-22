@@ -67,6 +67,25 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RogoGait")
 	FName BodyBone = TEXT("body");
 
+	// --- Debug: per-leg vertex coloring (testing aid) ---
+
+	/** When true, at BeginPlay paint each leg's vertices a distinct color (by dominant bone)
+	 *  and swap the mesh to DebugMaterial so the colors show. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RogoGait|Debug")
+	bool bDebugLegColors = false;
+
+	/** Per-leg debug colors, same order as HipBones (FL, FR, BL, BR). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RogoGait|Debug")
+	TArray<FLinearColor> LegColors;
+
+	/** Color for body / non-leg vertices. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RogoGait|Debug")
+	FLinearColor BodyColor = FLinearColor(0.15f, 0.15f, 0.15f, 1.f);
+
+	/** Material that displays vertex color (M_LegDebug). Swapped onto slot 0 while debugging. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RogoGait|Debug")
+	TObjectPtr<UMaterialInterface> DebugMaterial = nullptr;
+
 	/** WORLD-space foot targets, one per leg (read by FRigUnit_RogoGait). */
 	UPROPERTY(BlueprintReadOnly, Category = "RogoGait")
 	TArray<FTransform> FeetTargetsWorld;
@@ -88,4 +107,10 @@ private:
 
 	/** Sample hip/body rest offsets in actor-local space from the skeletal mesh. */
 	void SampleRestLayout();
+
+	/** Paint per-leg vertex colors (by dominant bone) + swap to DebugMaterial. */
+	void ApplyLegDebugColors();
+
+	/** Original slot-0 material, cached so debug coloring can be reverted. */
+	TObjectPtr<UMaterialInterface> CachedSlot0Material = nullptr;
 };
