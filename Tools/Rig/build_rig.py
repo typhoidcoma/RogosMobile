@@ -1,13 +1,13 @@
 """
-Builds CR_RogoBot's forward-solve graph: a procedural quadruped gait.
+Builds CR_RogoBot's forward-solve graph using the custom C++ gait node.
 Run in-editor:  python C:/Users/tesse/rcpy.py i:/Projects/Unreal/RogosMobile/Tools/Rig/build_rig.py
 
 Structure (forward solve):
-  BeginExecution -> RigUnit_Locomotor -> 4x TwoBoneIK (one per leg)
-  Locomotor (RootControl=body_ctrl, Pelvis=body, 4 FootSets w/ ankle bones, diagonal trot)
-    outputs FeetTransforms[] -> ArrayGetAtIndex(i) -> TwoBoneIK[i].Effector
-  TwoBoneIK bends hip->knee->ankle to reach each foot goal.
-Idempotent: clears existing nodes + body_ctrl first.
+  BeginExecution -> RigUnit_RogoGait -> 4x TwoBoneIK (one per leg)
+  RogoGait (C++, module RogosMobile) reads the owning actor's velocity, runs its own
+  phase timer (cadence = Frequency), and outputs world foot targets that world-lock
+  while planted -> the legs drive the motion. FeetTransforms[i] -> TwoBoneIK[i].Effector.
+Idempotent: clears existing nodes first. (Replaces the old RigUnit_Locomotor build.)
 """
 import unreal
 cr=unreal.EditorAssetLibrary.load_asset("/Game/RogoBot/Anim/CR_RogoBot")
@@ -26,74 +26,34 @@ for cn in ("body_ctrl","root_ctrl"):
         if hier.contains(ck): hc.remove_element(ck)
     except Exception: pass
 
-# ---- root_ctrl control at the ROOT bone (ground level, z~0) ----
-# The Locomotor's RootControl is its GROUND/floor reference for foot placement,
-# NOT the pelvis. Anchoring it at the root bone keeps feet on the floor; the
-# pelvis (body bone) is handled separately by PelvisSettings.
-st=unreal.RigControlSettings(); st.control_type=unreal.RigControlType.EULER_TRANSFORM
-val=hier.make_control_value_from_euler_transform(unreal.EulerTransform(scale=[1,1,1]))
-bck=hc.add_control("root_ctrl", EK(), st, val, True, True)
-hier.set_control_offset_transform(bck, hier.get_global_transform(bone("root"), True), True)
+# rest foot drop (hip rest Z above the foot) -> flat-ground foot height. Scale-immune via world Z.
+hipZ=hier.get_global_transform(bone("hip_FL"), True).translation.z
+ankZ=hier.get_global_transform(bone("ankle_FL"), True).translation.z
+REST_DROP=hipZ-ankZ
 
 # ---- BeginExecution ----
 begin=ctrl.add_unit_node_with_defaults(unreal.RigUnit_BeginExecution.static_struct(),
         unreal.RigUnit_BeginExecution().export_text(), 'Execute', unreal.Vector2D(-700,0))
 
-# ---- Locomotor ----
-loco=unreal.RigUnit_Locomotor()
-loco.root_control="root_ctrl"
-pv=unreal.PelvisSettings(); pv.pelvis_bone=bone("body")
-# lean the body partly with the ground slope (ramps). Keep moderate: high values
-# (>=0.5 pelvis / >=0.8 foot) over-rotate and freeze the gait at pitch -60.
-pv.orient_to_ground_pitch=0.3; pv.orient_to_ground_roll=0.3
-# tighten the body to the capsule: default damping 0.1 + lead 2.0 lagged the body
-# behind the capsule (rig trailed the sensing) AND made falls look floaty (body
-# trailed the fast-falling capsule). NOTE: the pelvis is also speed-clamped to the
-# gait's SpeedMax (160) -> keep MoveSpeed <= ~160 or the body lags unboundedly.
-pv.position_damping_half_life=0.035   # 0.1 -> 0.035 (snappy follow)
-pv.lead_amount=0.5                    # 2.0 -> 0.5 (less forward over-anticipation)
-pv.bob_offset=-10.0                   # -8 -> -10 (a touch more step weight)
-loco.pelvis=pv
-mv=unreal.MovementSettings()
-# MinimumStepLength 8->20: deliberate steps, not a micro-shuffle (see tune_gait.py).
-# Higher Acceleration/SpeedMax: the gait's internal speed ramp was too slow (accel 100)
-# so the pelvis fell behind the capsule unboundedly through the constant wander turns
-# (rig trailed FAR). accel 800 / speedmax 200 bound the body lag to ~half a body length.
-mv.speed_min=20.0; mv.speed_max=200.0; mv.minimum_step_length=20.0
-mv.acceleration=800.0; mv.deceleration=400.0
-loco.movement=mv
-# ground collision ON: feet trace down to whatever surface is under them (floor OR
-# ramp). orient_foot_to_ground tilts each foot to plant flat on the slope.
-st=unreal.StepSettings()
-st.enable_ground_collision=True
-st.enable_foot_collision=True   # feet are non-overlapping circles -> CollisionRadius spreads the stance
-st.orient_foot_to_ground_pitch=0.4
-st.orient_foot_to_ground_roll=0.3
-# anti-slide + reach (baked from tune_gait.py): feet lift+plant instead of dragging,
-# and can reach onto ramp lips / steps.
-st.step_height=14.0            # was unset/6 -> clear foot lift (kills the drag)
-st.percent_of_stride_in_air=0.45
-st.step_ease_in=0.5
-st.step_ease_out=0.1           # crisp plant on landing
-st.max_collision_height=45.0   # was 30 -> feet reach onto steps/ramp lips
-loco.stepping=st
-ln=ctrl.add_unit_node_with_defaults(loco.static_struct(), loco.export_text(), 'Execute', unreal.Vector2D(-450,0))
-NP=ln.get_node_path()
-ctrl.set_array_pin_size("%s.FootSets"%NP, 4)
+# ---- RogoGait (custom C++ gait) ----
+gait=unreal.RigUnit_RogoGait()
+gn=ctrl.add_unit_node_with_defaults(gait.static_struct(), gait.export_text(), 'Execute', unreal.Vector2D(-450,0))
+GP=gn.get_node_path()
+ctrl.set_pin_default_value("%s.Frequency"%GP, "1.5")
+ctrl.set_pin_default_value("%s.StanceFraction"%GP, "0.6")
+ctrl.set_pin_default_value("%s.StepHeight"%GP, "14.0")
+ctrl.set_pin_default_value("%s.BodyBob"%GP, "6.0")
+ctrl.set_pin_default_value("%s.RestDrop"%GP, str(REST_DROP))
+ctrl.set_pin_default_value("%s.BodyBone"%GP, '(Type=Bone,Name="body")')
+ctrl.set_array_pin_size("%s.Hips"%GP, 4)
+ctrl.set_array_pin_size("%s.PhaseOffsets"%GP, 4)
 for i,L in enumerate(LEGS):
-    ctrl.set_array_pin_size("%s.FootSets.%d.Feet"%(NP,i), 1)
-    ctrl.set_pin_default_value('%s.FootSets.%d.Feet.0.AnkleBone'%(NP,i), '(Type=Bone,Name="ankle_%s")'%L)
-    # MaxHeelPeel Z restored (zeroing it made the foot stay flat and DRAG = slide;
-    # the historical floating-feet bug was the bone-length scale issue, not heel peel).
-    ctrl.set_pin_default_value('%s.FootSets.%d.Feet.0.MaxHeelPeel'%(NP,i), '(X=0.000000,Y=0.000000,Z=40.000000)')
-    # CollisionRadius 10->28: foot circles push apart via foot-collision, spreading the
-    # clustered "crab" stance into an even ~56x66 machine rectangle (legs at corners).
-    ctrl.set_pin_default_value('%s.FootSets.%d.Feet.0.CollisionRadius'%(NP,i), '28.000000')
-    ctrl.set_pin_default_value('%s.FootSets.%d.PhaseOffset'%(NP,i), str(phases[L]))
-ctrl.add_link(begin.find_pin('ExecutePin').get_pin_path(), ln.find_pin('ExecutePin').get_pin_path())
+    ctrl.set_pin_default_value('%s.Hips.%d'%(GP,i), '(Type=Bone,Name="hip_%s")'%L)
+    ctrl.set_pin_default_value('%s.PhaseOffsets.%d'%(GP,i), str(phases[L]))
+ctrl.add_link(begin.find_pin('ExecutePin').get_pin_path(), gn.find_pin('ExecutePin').get_pin_path())
 
 # ---- per-leg: ArrayGetAtIndex(FeetTransforms, i) -> TwoBoneIK.Effector ----
-prev=ln  # for execution chain
+prev=gn
 for i,L in enumerate(LEGS):
     hip_g=hier.get_global_transform(bone("hip_"+L), True)
     knee_g=hier.get_global_transform(bone("knee_"+L), True)
@@ -101,9 +61,7 @@ for i,L in enumerate(LEGS):
     ik=unreal.RigUnit_TwoBoneIKSimplePerItem()
     ik.item_a=bone("hip_"+L); ik.item_b=bone("knee_"+L); ik.effector_item=bone("ankle_"+L)
     ik.primary_axis=knee_g.make_relative(hip_g).translation.normal()
-    # NOTE: imported bones carry scale=100 (Blender m->cm baked into bone scale),
-    # so make_relative().length() returns metres (0.32) not cm (32). Compute the
-    # segment lengths from raw world-space translations -> scale-immune, correct cm.
+    # bones carry scale=100 -> compute segment lengths from world translations (scale-immune).
     ik.item_a_length=(knee_g.translation - hip_g.translation).length()
     ik.item_b_length=(ankle_g.translation - knee_g.translation).length()
     ik.pole_vector=(knee_g.translation*3 - hip_g.translation - ankle_g.translation).normal()
@@ -112,15 +70,13 @@ for i,L in enumerate(LEGS):
     ik.secondary_axis_weight=0.0
     ik.effector=ankle_g
     ikn=ctrl.add_unit_node_with_defaults(ik.static_struct(), ik.export_text(), 'Execute', unreal.Vector2D(-150, i*180-270))
-    # array-get node
-    gn=ctrl.add_array_node(unreal.RigVMOpCode.ARRAY_GET_AT_INDEX, "FTransform", unreal.Transform.static_struct(),
-                           unreal.Vector2D(-300, i*180-270), "get_%s"%L)
-    ctrl.add_link(ln.find_pin('FeetTransforms').get_pin_path(), gn.find_pin('Array').get_pin_path())
-    ctrl.set_pin_default_value("%s.Index"%gn.get_node_path(), str(i))
-    ctrl.add_link(gn.find_pin('Element').get_pin_path(), ikn.find_pin('Effector').get_pin_path())
-    # execution chain
+    g=ctrl.add_array_node(unreal.RigVMOpCode.ARRAY_GET_AT_INDEX, "FTransform", unreal.Transform.static_struct(),
+                          unreal.Vector2D(-300, i*180-270), "get_%s"%L)
+    ctrl.add_link(gn.find_pin('FeetTransforms').get_pin_path(), g.find_pin('Array').get_pin_path())
+    ctrl.set_pin_default_value("%s.Index"%g.get_node_path(), str(i))
+    ctrl.add_link(g.find_pin('Element').get_pin_path(), ikn.find_pin('Effector').get_pin_path())
     ctrl.add_link(prev.find_pin('ExecutePin').get_pin_path(), ikn.find_pin('ExecutePin').get_pin_path())
     prev=ikn
 
 unreal.EditorAssetLibrary.save_loaded_asset(cr)
-print("RIG BUILT: nodes=", len(ctrl.get_graph().get_nodes()))
+print("RIG BUILT (RogoGait): nodes=", len(ctrl.get_graph().get_nodes()), "REST_DROP=%.1f"%REST_DROP)
