@@ -79,6 +79,23 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RogoGait|Ground")
 	float FootGroundOffset = 0.f;
 
+	/** Tilt the body to match the slope under the feet (pitch/roll), so it leans into hills
+	 *  instead of staying flat. Also equalises leg reach on grades. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RogoGait|Ground")
+	bool bBodyTilt = true;
+
+	/** How fully the body aligns to the slope (0 = upright, 1 = full slope match). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RogoGait|Ground")
+	float BodyTiltStrength = 0.9f;
+
+	/** Max body tilt from vertical (deg) — clamp so steep ground can't over-rotate the rig. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RogoGait|Ground")
+	float BodyTiltMaxDeg = 40.f;
+
+	/** World-space body up-vector the rig tilts the body bone toward (slope-follow). */
+	UPROPERTY(BlueprintReadOnly, Category = "RogoGait")
+	FVector BodyUpWorld = FVector::UpVector;
+
 	/** Hip bones, one per leg (FL, FR, BL, BR). */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RogoGait")
 	TArray<FName> HipBones;

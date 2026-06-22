@@ -26,6 +26,19 @@ FRigUnit_RogoGait_Execute()
 		BodyTransform = Hierarchy->GetGlobalTransform(BodyBone);
 		const float BobZ = Gait ? Gait->BodyBobZ : 0.f;
 		BodyTransform.AddToTranslation(FVector(0.f, 0.f, BobZ));
+
+		// Tilt the body to follow the slope: rotate so the rig's up aligns with the gait's
+		// slope up-vector (computed from the grounded feet). Flat ground -> no tilt.
+		if (Gait && OwningComp && Gait->bBodyTilt)
+		{
+			const FVector UpComp = OwningComp->GetComponentTransform()
+				.InverseTransformVectorNoScale(Gait->BodyUpWorld).GetSafeNormal();
+			if (!UpComp.IsNearlyZero())
+			{
+				const FQuat Tilt = FQuat::FindBetweenNormals(FVector::UpVector, UpComp);
+				BodyTransform.SetRotation(Tilt * BodyTransform.GetRotation());
+			}
+		}
 	}
 
 	if (Gait && OwningComp && Gait->FeetTargetsWorld.Num() > 0)
