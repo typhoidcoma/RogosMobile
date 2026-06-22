@@ -26,6 +26,25 @@ public:
 	virtual void BeginPlay() override;
 	virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
+	/** Kick the body-sway spring so it recoils from a hit coming along WorldDir (the body's top
+	 *  lags away from the shove, then settles). Strength is roughly the angular kick (deg/s). */
+	UFUNCTION(BlueprintCallable, Category = "RogoGait|Dynamics")
+	void AddBodyImpulse(FVector WorldDir, float Strength);
+
+	/** Shove the whole pawn: launch the capsule along WorldDir at Speed (cm/s) AND lurch the body
+	 *  (knockback). The capsule's velocity change also feeds the momentum sway. */
+	UFUNCTION(BlueprintCallable, Category = "RogoGait|Dynamics")
+	void Knockback(FVector WorldDir, float Speed);
+
+	/** Collapse into / out of a physics ragdoll. On: stop movement, disable the gait, simulate the
+	 *  mesh from its current pose. Off: best-effort return to the walking state. */
+	UFUNCTION(BlueprintCallable, Category = "RogoGait|Dynamics")
+	void SetRagdoll(bool bOn);
+
+	/** Convenience: collapse into a ragdoll (= SetRagdoll(true)). Wire this to your death event. */
+	UFUNCTION(BlueprintCallable, Category = "RogoGait|Dynamics")
+	void Die();
+
 	/** Base cadence at zero speed (cycles/sec). */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RogoGait")
 	float Frequency = 1.5f;

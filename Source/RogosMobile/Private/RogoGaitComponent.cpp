@@ -3,6 +3,8 @@
 #include "GameFramework/Actor.h"
 #include "Kismet/KismetSystemLibrary.h"
 #include "GameFramework/CharacterMovementComponent.h"
+#include "GameFramework/Character.h"
+#include "Components/CapsuleComponent.h"
 #include "Engine/SkeletalMesh.h"
 #include "Rendering/SkeletalMeshRenderData.h"
 #include "Rendering/SkeletalMeshLODRenderData.h"
@@ -316,6 +318,77 @@ void URogoGaitComponent::TickComponent(float DeltaTime, ELevelTick TickType, FAc
 			* FQuat(Move, FMath::DegreesToRadians(Sway.Y));
 		BodyUpWorld = Q.RotateVector(BodyUpWorld).GetSafeNormal();
 	}
+}
+
+void URogoGaitComponent::AddBodyImpulse(FVector WorldDir, float Strength)
+{
+	const AActor* Owner = GetOwner();
+	if (Owner == nullptr) { return; }
+	FVector D(WorldDir.X, WorldDir.Y, 0.f);
+	if (!D.Normalize()) { return; }
+	const FTransform X = Owner->GetActorTransform();
+	const float F = FVector::DotProduct(D, X.GetUnitAxis(EAxis::X));   // +front .. -back of the shove
+	const float R = FVector::DotProduct(D, X.GetUnitAxis(EAxis::Y));   // +right .. -left
+	// The body's top lags AWAY from the shove direction, then the spring settles it back.
+	SwayVel.X += -F * Strength;
+	SwayVel.Y += -R * Strength;
+}
+
+void URogoGaitComponent::Knockback(FVector WorldDir, float Speed)
+{
+	if (ACharacter* Ch = Cast<ACharacter>(GetOwner()))
+	{
+		Ch->LaunchCharacter(WorldDir.GetSafeNormal() * Speed, true, false);   // override planar velocity
+	}
+	AddBodyImpulse(WorldDir, Speed * 0.3f);   // body lurches with the shove
+}
+
+void URogoGaitComponent::SetRagdoll(bool bOn)
+{
+	AActor* Owner = GetOwner();
+	if (Owner == nullptr) { return; }
+	USkeletalMeshComponent* Mesh = Owner->FindComponentByClass<USkeletalMeshComponent>();
+	UCharacterMovementComponent* CMC = Owner->FindComponentByClass<UCharacterMovementComponent>();
+	ACharacter* Ch = Cast<ACharacter>(Owner);
+
+	if (bOn)
+	{
+		// Stop the capsule/movement and the gait so they don't fight the simulated mesh.
+		if (CMC) { CMC->StopMovementImmediately(); CMC->DisableMovement(); }
+		if (Ch && Ch->GetCapsuleComponent()) { Ch->GetCapsuleComponent()->SetCollisionEnabled(ECollisionEnabled::QueryOnly); }
+		SetComponentTickEnabled(false);
+		if (Mesh)
+		{
+			// Keep the existing (non-self-colliding) profile: the auto-generated per-bone bodies
+			// overlap, so enabling body-vs-body collision (the "Ragdoll" profile) explodes them.
+			Mesh->SetAllBodiesPhysicsBlendWeight(1.f);
+			Mesh->SetAllPhysicsLinearVelocity(FVector::ZeroVector);   // drop any inherited velocity
+			Mesh->SetAllBodiesSimulatePhysics(true);
+			Mesh->SetSimulatePhysics(true);
+			Mesh->WakeAllRigidBodies();
+		}
+	}
+	else
+	{
+		// Best-effort recovery: stop simulating, re-enable movement + the gait.
+		if (Mesh)
+		{
+			Mesh->SetSimulatePhysics(false);
+			Mesh->SetCollisionProfileName(TEXT("PhysicsActor"));
+			Mesh->AttachToComponent(Ch ? (USceneComponent*)Ch->GetCapsuleComponent() : Owner->GetRootComponent(),
+				FAttachmentTransformRules::SnapToTargetNotIncludingScale);
+			Mesh->SetRelativeLocationAndRotation(FVector(0.f, 0.f, -59.f), FRotator(0.f, -90.f, 0.f));
+		}
+		if (Ch && Ch->GetCapsuleComponent()) { Ch->GetCapsuleComponent()->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics); }
+		if (CMC) { CMC->SetMovementMode(MOVE_Walking); }
+		bInitialised = false;   // re-sample the rest layout
+		SetComponentTickEnabled(true);
+	}
+}
+
+void URogoGaitComponent::Die()
+{
+	SetRagdoll(true);
 }
 
 void URogoGaitComponent::ApplyLegDebugColors()
