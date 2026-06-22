@@ -2,6 +2,7 @@
 #include "Components/SkeletalMeshComponent.h"
 #include "GameFramework/Actor.h"
 #include "Kismet/KismetSystemLibrary.h"
+#include "GameFramework/CharacterMovementComponent.h"
 #include "Engine/SkeletalMesh.h"
 #include "Rendering/SkeletalMeshRenderData.h"
 #include "Rendering/SkeletalMeshLODRenderData.h"
@@ -107,6 +108,48 @@ void URogoGaitComponent::TickComponent(float DeltaTime, ELevelTick TickType, FAc
 	if (!Move.Normalize())
 	{
 		Move = ActorXf.GetUnitAxis(EAxis::X);   // idle -> face forward
+	}
+
+	// Body-dynamics spring: lean from momentum (inertial lag) + banking into turns. The Sway
+	// (pitch,roll) is integrated here and folded into BodyUpWorld below (after the slope tilt).
+	if (bBodyDynamics && DeltaTime > KINDA_SMALL_NUMBER)
+	{
+		// Drive the lean from the STEERING INPUT (clean intent) + speed, not noisy measured
+		// derivatives (those saturate/ring on this jittery AI). Bounded to [-1,1] so it can't
+		// blow up. Lean forward into the run (+ extra when braking) and bank into the steer dir.
+		FVector InDir = FVector::ZeroVector;
+		if (const UCharacterMovementComponent* CMC = Owner->FindComponentByClass<UCharacterMovementComponent>())
+		{
+			const FVector IA = CMC->GetCurrentAcceleration();
+			InDir = FVector(IA.X, IA.Y, 0.f).GetSafeNormal();
+		}
+		const FVector Fwd = ActorXf.GetUnitAxis(EAxis::X);
+		const FVector Right = ActorXf.GetUnitAxis(EAxis::Y);
+		const float SpeedFrac = FMath::Min(Speed / 150.f, 1.f);
+		const float Longi = SpeedFrac - 0.6f * FMath::Max(0.f, -FVector::DotProduct(InDir, Fwd));  // run-lean + brake
+		const float Latrl = FVector::DotProduct(InDir, Right);                                     // steer left/right
+
+		const float LP = FMath::Clamp(DeltaTime * DynSmoothRate, 0.f, 1.f);
+		SmoothFwdAccel = FMath::Lerp(SmoothFwdAccel, Longi, LP);
+		SmoothTurn = FMath::Lerp(SmoothTurn, Latrl, LP);
+
+		// Gate off when nearly stopped (a near-stationary AI jitters its input/velocity).
+		const float SpeedGate = FMath::Clamp((Speed - 25.f) / 35.f, 0.f, 1.f);
+		const FVector2D Target(
+			FMath::Clamp(AccelSwayGain * SmoothFwdAccel, -SwayMaxDeg, SwayMaxDeg) * SpeedGate,   // pitch: lean into run
+			FMath::Clamp(TurnSwayGain * SmoothTurn, -SwayMaxDeg, SwayMaxDeg) * SpeedGate);        // roll: bank into steer
+
+		const FVector2D SpringAcc = (Target - Sway) * SwayStiffness - SwayVel * SwayDamping;
+		SwayVel += SpringAcc * DeltaTime;
+		Sway += SwayVel * DeltaTime;
+		Sway.X = FMath::Clamp(Sway.X, -SwayMaxDeg, SwayMaxDeg);
+		Sway.Y = FMath::Clamp(Sway.Y, -SwayMaxDeg, SwayMaxDeg);
+	}
+	else
+	{
+		Sway = FVector2D::ZeroVector;
+		SwayVel = FVector2D::ZeroVector;
+		bDynInit = false;
 	}
 
 	// Cadence scales with speed (state persists fine here), phase integrated from DeltaTime.
@@ -262,6 +305,16 @@ void URogoGaitComponent::TickComponent(float DeltaTime, ELevelTick TickType, FAc
 				BodyUpWorld = FMath::Lerp(FVector::UpVector, N, t).GetSafeNormal();
 			}
 		}
+	}
+
+	// Fold the momentum-sway lean into the body up-vector (on top of the slope tilt): pitch
+	// around the movement-right axis, roll/bank around the movement axis.
+	if (bBodyDynamics && (FMath::Abs(Sway.X) > 0.01f || FMath::Abs(Sway.Y) > 0.01f))
+	{
+		const FVector RightAxis = FVector::CrossProduct(Move, FVector::UpVector).GetSafeNormal();
+		const FQuat Q = FQuat(RightAxis, FMath::DegreesToRadians(Sway.X))
+			* FQuat(Move, FMath::DegreesToRadians(Sway.Y));
+		BodyUpWorld = Q.RotateVector(BodyUpWorld).GetSafeNormal();
 	}
 }
 
