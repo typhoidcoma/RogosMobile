@@ -117,6 +117,18 @@ void URogoGaitComponent::TickComponent(float DeltaTime, ELevelTick TickType, FAc
 	const float Stance = FMath::Clamp(StanceFraction, 0.05f, 0.95f);
 	const float Amp = Stance * Stride * 0.5f;
 
+	// Self-tuning: derive effective step-height + crouch from speed and the terrain measured
+	// last tick (Grade/Roughness). Faster/rougher -> higher steps; steeper -> deeper crouch.
+	float EffStepHeight = StepHeight;
+	float EffCrouch = BodyHeightOffset;
+	if (bSelfTune)
+	{
+		EffStepHeight = StepHeight + StepHeightSpeedGain * Speed + StepHeightRoughGain * Roughness;
+		EffStepHeight = FMath::Clamp(EffStepHeight, StepHeight, StepHeight * 3.f + 40.f);
+		// Deeper crouch on steeper grade, clamped so the legs can't fully collapse.
+		EffCrouch = BodyHeightOffset - FMath::Min(CrouchGradeGain * Grade, 30.f);
+	}
+
 	if (PlantAnchors.Num() != NumLegs) { PlantAnchors.SetNum(NumLegs); }
 	if (PrevLegPhase.Num() != NumLegs) { PrevLegPhase.SetNumZeroed(NumLegs); }
 	FeetTargetsWorld.SetNum(NumLegs);
@@ -178,7 +190,7 @@ void URogoGaitComponent::TickComponent(float DeltaTime, ELevelTick TickType, FAc
 			const float s = (LegPhase - Stance) / (1.f - Stance);
 			Foot = FMath::Lerp(PlantAnchors[i], PlantTarget, s);
 			SurfaceZ = GroundZ(Foot, Home.Z);
-			Foot.Z = SurfaceZ + FMath::Sin(s * PI) * StepHeight;   // arc above the surface
+			Foot.Z = SurfaceZ + FMath::Sin(s * PI) * EffStepHeight;   // arc above the surface
 		}
 
 		FeetTargetsWorld[i] = FTransform(Foot);
@@ -186,14 +198,14 @@ void URogoGaitComponent::TickComponent(float DeltaTime, ELevelTick TickType, FAc
 		PrevLegPhase[i] = LegPhase;
 	}
 
-	// Body height: constant crouch (BodyHeightOffset, lowers the body so legs fold = spider)
+	// Body height: speed/terrain-tuned crouch (EffCrouch) lowers the body so legs fold (spider)
 	// plus the per-cycle bob that dips at the two stance midpoints (diagonal trot).
-	BodyBobZ = BodyHeightOffset - BodyBob * (0.5f - 0.5f * FMath::Cos(Phase * 2.f * PI * 2.f));
+	BodyBobZ = EffCrouch - BodyBob * (0.5f - 0.5f * FMath::Cos(Phase * 2.f * PI * 2.f));
 
-	// Body tilt: the up-vector of the plane through the four grounded feet (slope follow),
-	// clamped + blended. The rig leans the body bone toward this. Flat ground -> straight up.
+	// Plane through the four grounded feet -> normal N. Drives both the body tilt (slope
+	// follow) and the terrain metrics (grade + roughness) that feed the self-tuning above.
 	BodyUpWorld = FVector::UpVector;
-	if (bBodyTilt && NumLegs >= 4)
+	if (NumLegs >= 4)
 	{
 		// FL=0 FR=1 BL=2 BR=3.
 		const FVector Front = (FootGround[0] + FootGround[1]) * 0.5f;
@@ -204,10 +216,28 @@ void URogoGaitComponent::TickComponent(float DeltaTime, ELevelTick TickType, FAc
 		if (N.Z < 0.f) { N = -N; }
 		if (N.Normalize())
 		{
-			const float Ang = FMath::RadiansToDegrees(FMath::Acos(FMath::Clamp(N.Z, -1.f, 1.f)));
-			const float t = FMath::Clamp(BodyTiltStrength, 0.f, 1.f)
-				* FMath::Min(1.f, BodyTiltMaxDeg / FMath::Max(Ang, KINDA_SMALL_NUMBER));
-			BodyUpWorld = FMath::Lerp(FVector::UpVector, N, t).GetSafeNormal();
+			// Terrain metrics (smoothed): grade = how far the plane tilts from flat;
+			// roughness = RMS of the feet off that plane (bumpiness).
+			const FVector Centroid = (FootGround[0] + FootGround[1] + FootGround[2] + FootGround[3]) * 0.25f;
+			float SumSq = 0.f;
+			for (int32 k = 0; k < 4; ++k)
+			{
+				const float d = FVector::DotProduct(FootGround[k] - Centroid, N);
+				SumSq += d * d;
+			}
+			const float RawRough = FMath::Sqrt(SumSq * 0.25f);
+			const float RawGrade = 1.f - N.Z;
+			const float A = FMath::Clamp(DeltaTime * TerrainSmoothRate, 0.f, 1.f);
+			Grade = FMath::Lerp(Grade, RawGrade, A);
+			Roughness = FMath::Lerp(Roughness, RawRough, A);
+
+			if (bBodyTilt)
+			{
+				const float Ang = FMath::RadiansToDegrees(FMath::Acos(FMath::Clamp(N.Z, -1.f, 1.f)));
+				const float t = FMath::Clamp(BodyTiltStrength, 0.f, 1.f)
+					* FMath::Min(1.f, BodyTiltMaxDeg / FMath::Max(Ang, KINDA_SMALL_NUMBER));
+				BodyUpWorld = FMath::Lerp(FVector::UpVector, N, t).GetSafeNormal();
+			}
 		}
 	}
 }

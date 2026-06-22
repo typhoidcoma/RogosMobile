@@ -96,6 +96,37 @@ public:
 	UPROPERTY(BlueprintReadOnly, Category = "RogoGait")
 	FVector BodyUpWorld = FVector::UpVector;
 
+	// --- Self-tuning: gait adapts to speed + terrain (no manual tuning per situation). ---
+
+	/** Master toggle for the speed/terrain adaptation below. Off = use the base values as-is. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RogoGait|SelfTune")
+	bool bSelfTune = true;
+
+	/** Added foot-lift per cm/s of speed (cm). Faster = higher steps. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RogoGait|SelfTune")
+	float StepHeightSpeedGain = 0.06f;
+
+	/** Added foot-lift per cm of terrain roughness. Bumpier ground = higher steps to clear it. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RogoGait|SelfTune")
+	float StepHeightRoughGain = 1.5f;
+
+	/** Extra crouch (cm) per unit of grade (grade = 1-cos(slope); ~0.13 at 30deg, 0.29 at 45deg).
+	 *  Steeper = lower body. Clamped so it can't fully collapse the legs. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RogoGait|SelfTune")
+	float CrouchGradeGain = 50.f;
+
+	/** How fast the measured grade/roughness follow the terrain (per sec). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RogoGait|SelfTune")
+	float TerrainSmoothRate = 4.f;
+
+	/** Measured terrain grade under the feet (0 flat .. ~0.3 at 45deg). Read-only. */
+	UPROPERTY(BlueprintReadOnly, Category = "RogoGait|SelfTune")
+	float Grade = 0.f;
+
+	/** Measured terrain roughness under the feet (RMS off the foot plane, cm). Read-only. */
+	UPROPERTY(BlueprintReadOnly, Category = "RogoGait|SelfTune")
+	float Roughness = 0.f;
+
 	/** Hip bones, one per leg (FL, FR, BL, BR). */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RogoGait")
 	TArray<FName> HipBones;
