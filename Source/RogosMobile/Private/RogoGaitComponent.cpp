@@ -120,6 +120,8 @@ void URogoGaitComponent::TickComponent(float DeltaTime, ELevelTick TickType, FAc
 	if (PlantAnchors.Num() != NumLegs) { PlantAnchors.SetNum(NumLegs); }
 	if (PrevLegPhase.Num() != NumLegs) { PrevLegPhase.SetNumZeroed(NumLegs); }
 	FeetTargetsWorld.SetNum(NumLegs);
+	TArray<FVector> FootGround;            // per-foot ground point (no lift) for the slope plane
+	FootGround.SetNum(NumLegs);
 
 	// Ground Z under a foot XY (the real surface, for slopes). Falls back to the flat foot
 	// height when disabled or nothing is hit. Same trace channel as the steering probes.
@@ -165,24 +167,49 @@ void URogoGaitComponent::TickComponent(float DeltaTime, ELevelTick TickType, FAc
 		}
 
 		FVector Foot;
+		float SurfaceZ;
 		if (bStance)
 		{
 			Foot = PlantAnchors[i];     // held world anchor (incl. slope Z) -> turn-proof + grounded
+			SurfaceZ = Foot.Z;
 		}
 		else
 		{
 			const float s = (LegPhase - Stance) / (1.f - Stance);
 			Foot = FMath::Lerp(PlantAnchors[i], PlantTarget, s);
-			Foot.Z = GroundZ(Foot, Home.Z) + FMath::Sin(s * PI) * StepHeight;   // arc above the surface
+			SurfaceZ = GroundZ(Foot, Home.Z);
+			Foot.Z = SurfaceZ + FMath::Sin(s * PI) * StepHeight;   // arc above the surface
 		}
 
 		FeetTargetsWorld[i] = FTransform(Foot);
+		FootGround[i] = FVector(Foot.X, Foot.Y, SurfaceZ);
 		PrevLegPhase[i] = LegPhase;
 	}
 
 	// Body height: constant crouch (BodyHeightOffset, lowers the body so legs fold = spider)
 	// plus the per-cycle bob that dips at the two stance midpoints (diagonal trot).
 	BodyBobZ = BodyHeightOffset - BodyBob * (0.5f - 0.5f * FMath::Cos(Phase * 2.f * PI * 2.f));
+
+	// Body tilt: the up-vector of the plane through the four grounded feet (slope follow),
+	// clamped + blended. The rig leans the body bone toward this. Flat ground -> straight up.
+	BodyUpWorld = FVector::UpVector;
+	if (bBodyTilt && NumLegs >= 4)
+	{
+		// FL=0 FR=1 BL=2 BR=3.
+		const FVector Front = (FootGround[0] + FootGround[1]) * 0.5f;
+		const FVector Back  = (FootGround[2] + FootGround[3]) * 0.5f;
+		const FVector Lft   = (FootGround[0] + FootGround[2]) * 0.5f;
+		const FVector Rgt   = (FootGround[1] + FootGround[3]) * 0.5f;
+		FVector N = FVector::CrossProduct(Rgt - Lft, Front - Back);   // plane normal
+		if (N.Z < 0.f) { N = -N; }
+		if (N.Normalize())
+		{
+			const float Ang = FMath::RadiansToDegrees(FMath::Acos(FMath::Clamp(N.Z, -1.f, 1.f)));
+			const float t = FMath::Clamp(BodyTiltStrength, 0.f, 1.f)
+				* FMath::Min(1.f, BodyTiltMaxDeg / FMath::Max(Ang, KINDA_SMALL_NUMBER));
+			BodyUpWorld = FMath::Lerp(FVector::UpVector, N, t).GetSafeNormal();
+		}
+	}
 }
 
 void URogoGaitComponent::ApplyLegDebugColors()
