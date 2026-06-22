@@ -141,6 +141,42 @@ public:
 	UPROPERTY(BlueprintReadOnly, Category = "RogoGait|SelfTune")
 	float Roughness = 0.f;
 
+	// --- Physics-reactive: a procedural spring leans the body from momentum/impacts. ---
+
+	/** Master toggle for the momentum sway / impact lean. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RogoGait|Dynamics")
+	bool bBodyDynamics = true;
+
+	/** Forward lean (deg) at full speed — the body leans into its run (driven by the steering
+	 *  input, not noisy measured accel), with extra forward lean when braking. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RogoGait|Dynamics")
+	float AccelSwayGain = 8.f;
+
+	/** Bank (deg) at full steer — leans into the steering direction. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RogoGait|Dynamics")
+	float TurnSwayGain = 12.f;
+
+	/** Spring stiffness pulling the lean toward its target (higher = snappier). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RogoGait|Dynamics")
+	float SwayStiffness = 40.f;
+
+	/** Spring damping (~critical for the stiffness above = no wobble). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RogoGait|Dynamics")
+	float SwayDamping = 13.f;
+
+	/** Max lean from any one axis (deg). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RogoGait|Dynamics")
+	float SwayMaxDeg = 14.f;
+
+	/** Low-pass rate (per sec) for the steering-input lean signal before the spring.
+	 *  Lower = smoother but laggier. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RogoGait|Dynamics")
+	float DynSmoothRate = 4.f;
+
+	/** Current sway lean (X = pitch fwd/back, Y = roll/bank), deg. Read-only. */
+	UPROPERTY(BlueprintReadOnly, Category = "RogoGait|Dynamics")
+	FVector2D Sway = FVector2D::ZeroVector;
+
 	/** Hip bones, one per leg (FL, FR, BL, BR). */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RogoGait")
 	TArray<FName> HipBones;
@@ -184,6 +220,14 @@ public:
 private:
 	float Phase = 0.f;
 	bool bInitialised = false;
+
+	// Body-dynamics spring state.
+	FVector2D SwayVel = FVector2D::ZeroVector;   // d(Sway)/dt for the pitch/roll spring
+	FVector PrevVelocity = FVector::ZeroVector;
+	float PrevYaw = 0.f;
+	float SmoothFwdAccel = 0.f;                  // low-passed body-frame accel + turn rate
+	float SmoothTurn = 0.f;
+	bool bDynInit = false;
 
 	// Per-leg state (world space) + the rest layout sampled once from the mesh ref pose.
 	TArray<FVector> PlantAnchors;     // world plant point held through stance
