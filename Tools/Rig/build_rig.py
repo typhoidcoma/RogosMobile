@@ -40,6 +40,7 @@ gait=unreal.RigUnit_RogoGait()
 gn=ctrl.add_unit_node_with_defaults(gait.static_struct(), gait.export_text(), 'Execute', unreal.Vector2D(-450,0))
 GP=gn.get_node_path()
 ctrl.set_pin_default_value("%s.Frequency"%GP, "1.5")
+ctrl.set_pin_default_value("%s.CadenceGain"%GP, "0.01")
 ctrl.set_pin_default_value("%s.StanceFraction"%GP, "0.6")
 ctrl.set_pin_default_value("%s.StepHeight"%GP, "14.0")
 ctrl.set_pin_default_value("%s.BodyBob"%GP, "6.0")
@@ -52,8 +53,20 @@ for i,L in enumerate(LEGS):
     ctrl.set_pin_default_value('%s.PhaseOffsets.%d'%(GP,i), str(phases[L]))
 ctrl.add_link(begin.find_pin('ExecutePin').get_pin_path(), gn.find_pin('ExecutePin').get_pin_path())
 
+# ---- body bob: SetTransform(body) <- RogoGait.BodyTransform (global) ----
+# Runs BEFORE the IK legs. BodyTransform is the body's global pose + Z bob; propagating
+# to children lifts the hips with it, while the IK below re-pins each ankle to its world
+# FeetTransform -> body bobs, planted feet stay world-locked (legs extend/compress).
+sb=unreal.RigUnit_SetTransform()
+sb.item=bone("body")
+sb.space=unreal.RigVMTransformSpace.GLOBAL_SPACE
+sb.propagate_to_children=True
+sbn=ctrl.add_unit_node_with_defaults(sb.static_struct(), sb.export_text(), 'Execute', unreal.Vector2D(-300,150))
+ctrl.add_link(gn.find_pin('ExecutePin').get_pin_path(), sbn.find_pin('ExecutePin').get_pin_path())
+ctrl.add_link(gn.find_pin('BodyTransform').get_pin_path(), sbn.find_pin('Value').get_pin_path())
+
 # ---- per-leg: ArrayGetAtIndex(FeetTransforms, i) -> TwoBoneIK.Effector ----
-prev=gn
+prev=sbn
 for i,L in enumerate(LEGS):
     hip_g=hier.get_global_transform(bone("hip_"+L), True)
     knee_g=hier.get_global_transform(bone("knee_"+L), True)
