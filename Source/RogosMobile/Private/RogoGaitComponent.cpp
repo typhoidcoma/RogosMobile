@@ -5,11 +5,6 @@
 #include "GameFramework/CharacterMovementComponent.h"
 #include "GameFramework/Character.h"
 #include "Components/CapsuleComponent.h"
-#include "PhysicsEngine/PhysicalAnimationComponent.h"
-#include "Engine/SkeletalMesh.h"
-#include "Rendering/SkeletalMeshRenderData.h"
-#include "Rendering/SkeletalMeshLODRenderData.h"
-#include "Rendering/SkinWeightVertexBuffer.h"
 
 URogoGaitComponent::URogoGaitComponent()
 {
@@ -19,72 +14,12 @@ URogoGaitComponent::URogoGaitComponent()
 	// Defaults for the RogoBot skeleton: diagonal trot.
 	HipBones = { TEXT("hip_FL"), TEXT("hip_FR"), TEXT("hip_BL"), TEXT("hip_BR") };
 	PhaseOffsets = { 0.f, 0.5f, 0.5f, 0.f };
-
-	// Debug per-leg colors (FL red, FR green, BL blue, BR yellow).
-	LegColors = {
-		FLinearColor(1.f, 0.05f, 0.05f, 1.f),
-		FLinearColor(0.05f, 1.f, 0.05f, 1.f),
-		FLinearColor(0.1f, 0.3f, 1.f, 1.f),
-		FLinearColor(1.f, 0.9f, 0.05f, 1.f)
-	};
 }
 
 void URogoGaitComponent::BeginPlay()
 {
 	Super::BeginPlay();
 	SampleRestLayout();
-	if (bDebugLegColors)
-	{
-		ApplyLegDebugColors();
-	}
-	if (bPhysicalParts)
-	{
-		SetupPhysicalParts();
-	}
-}
-
-void URogoGaitComponent::SetupPhysicalParts()
-{
-	if (bPhysSetup) { return; }
-	AActor* Owner = GetOwner();
-	if (Owner == nullptr) { return; }
-	USkeletalMeshComponent* Mesh = Owner->FindComponentByClass<USkeletalMeshComponent>();
-	PhysAnim = Owner->FindComponentByClass<UPhysicalAnimationComponent>();
-	if (Mesh == nullptr || PhysAnim == nullptr) { return; }   // physanim component not attached yet
-
-	// Simulate the body + legs (root stays kinematic, anchored to the moving capsule), then motor
-	// them toward the animated (Control Rig) pose. They follow the gait but collide/deflect off
-	// the world. Self-collision stays OFF (the auto-gen bodies overlap and would explode).
-	Mesh->SetAllBodiesBelowSimulatePhysics(PhysSimRootBone, true);
-	Mesh->SetEnableGravity(false);        // the motors define the pose; gravity is re-enabled on ragdoll
-
-	PhysAnim->SetSkeletalMeshComponent(Mesh);
-	FPhysicalAnimationData S;
-	S.bIsLocalSimulation = true;          // simulate RELATIVE to the kinematic root -> inherits the
-	S.OrientationStrength = PhysAnimStrength;   // pawn's motion (correct for a moving character)
-	S.AngularVelocityStrength = PhysAnimDamping;
-	// A local-space LINEAR motor too (not just orientation): without it the bodies drift -- the legs
-	// stretch up when the kinematic root accelerates (falling / stepping off a ledge), because the
-	// accelerating sim frame pushes them off-target. The position motor pulls them back to the pose.
-	S.PositionStrength = PhysAnimStrength;
-	S.VelocityStrength = PhysAnimDamping;
-	S.MaxLinearForce = (PhysAnimMaxForce > 0.f) ? PhysAnimMaxForce : 1.0e6f;
-	S.MaxAngularForce = (PhysAnimMaxForce > 0.f) ? PhysAnimMaxForce : 1.0e7f;
-	PhysAnim->ApplyPhysicalAnimationSettingsBelow(PhysSimRootBone, S, true);
-
-	// Keep the FEET (ankle bodies) KINEMATIC so the IK plants them cleanly. If they simulate, then
-	// with gravity off any upward ground-contact impulse ratchets them up (nothing settles them back)
-	// and the legs slowly stretch off the floor. The body + upper legs still simulate/collide/deflect.
-	for (const FName& Hip : HipBones)
-	{
-		FString Suffix;
-		if (Hip.ToString().Split(TEXT("_"), nullptr, &Suffix))
-		{
-			const FName Ankle(*(FString(TEXT("ankle_")) + Suffix));
-			Mesh->SetAllBodiesBelowSimulatePhysics(Ankle, false, true);   // ankle + below -> kinematic
-		}
-	}
-	bPhysSetup = true;
 }
 
 void URogoGaitComponent::SampleRestLayout()
@@ -146,29 +81,6 @@ void URogoGaitComponent::TickComponent(float DeltaTime, ELevelTick TickType, FAc
 		if (!bInitialised)
 		{
 			return;
-		}
-	}
-
-	// Physical-sim NaN watchdog: a simulated body can explode (overlapping auto-gen bodies, a hard
-	// world contact, or a fast capsule teleport) -> the post-physics blend then writes a NaN bone
-	// into the Control Rig ("Bone (knee_FR) contains NaN" ensure + a broken mesh). Detect it from
-	// the mesh bounds and snap the bodies back to the animated (kinematic) pose so it self-heals
-	// instead of corrupting the anim. Runs PrePhysics, before this frame's sim step + blend.
-	if (bPhysicalParts && bPhysSetup)
-	{
-		if (USkeletalMeshComponent* M = GetOwner()->FindComponentByClass<USkeletalMeshComponent>())
-		{
-			const FBoxSphereBounds& B = M->Bounds;
-			const FVector ActorLoc = GetOwner()->GetActorLocation();
-			if (B.Origin.ContainsNaN() || !FMath::IsFinite(B.SphereRadius) || B.SphereRadius > 2.0e4f
-				|| FVector::DistSquared(B.Origin, ActorLoc) > FMath::Square(160.f))   // gross drift: legs stretched off-pose
-			{
-				M->SetAllBodiesBelowSimulatePhysics(PhysSimRootBone, false);   // -> kinematic, snaps clean
-				M->SetAllPhysicsLinearVelocity(FVector::ZeroVector);
-				M->SetAllPhysicsAngularVelocityInRadians(FVector::ZeroVector);
-				bPhysSetup = false;
-				SetupPhysicalParts();   // re-sim + re-motor from the clean pose
-			}
 		}
 	}
 
@@ -470,14 +382,13 @@ void URogoGaitComponent::SetRagdoll(bool bOn)
 		{
 			// Keep the existing (non-self-colliding) profile: the auto-generated per-bone bodies
 			// overlap, so enabling body-vs-body collision (the "Ragdoll" profile) explodes them.
-			Mesh->SetEnableGravity(true);                            // physanim disabled it; ragdoll needs it
+			Mesh->SetEnableGravity(true);                            // ragdoll needs gravity
 			Mesh->SetAllBodiesPhysicsBlendWeight(1.f);
 			Mesh->SetAllPhysicsLinearVelocity(FVector::ZeroVector);   // drop any inherited velocity
 			Mesh->SetAllBodiesSimulatePhysics(true);
 			Mesh->SetSimulatePhysics(true);                          // whole mesh incl. root -> full tumble
 			Mesh->WakeAllRigidBodies();
 		}
-		if (PhysAnim) { PhysAnim->SetStrengthMultiplyer(0.f); }      // motors off -> limp
 	}
 	else
 	{
@@ -495,82 +406,10 @@ void URogoGaitComponent::SetRagdoll(bool bOn)
 		if (CMC) { CMC->SetMovementMode(MOVE_Walking); }
 		bInitialised = false;   // re-sample the rest layout
 		SetComponentTickEnabled(true);
-		// Restore the physical-animation parts (re-sim body+legs + motors) for the recovered walk.
-		if (bPhysicalParts)
-		{
-			bPhysSetup = false;
-			SetupPhysicalParts();
-			if (PhysAnim) { PhysAnim->SetStrengthMultiplyer(1.f); }
-		}
 	}
 }
 
 void URogoGaitComponent::Die()
 {
 	SetRagdoll(true);
-}
-
-void URogoGaitComponent::ApplyLegDebugColors()
-{
-	AActor* Owner = GetOwner();
-	if (Owner == nullptr) { return; }
-	USkeletalMeshComponent* Mesh = Owner->FindComponentByClass<USkeletalMeshComponent>();
-	if (Mesh == nullptr) { return; }
-	USkeletalMesh* Asset = Mesh->GetSkeletalMeshAsset();
-	if (Asset == nullptr) { return; }
-	FSkeletalMeshRenderData* RD = Asset->GetResourceForRendering();
-	if (RD == nullptr || RD->LODRenderData.Num() == 0) { return; }
-
-	FSkeletalMeshLODRenderData& LOD = RD->LODRenderData[0];
-	const FSkinWeightVertexBuffer* SWB = LOD.GetSkinWeightVertexBuffer();
-	const int32 NumVerts = LOD.GetNumVertices();
-	if (SWB == nullptr || NumVerts == 0) { return; }
-	const FReferenceSkeleton& RefSkel = Asset->GetRefSkeleton();
-	const int32 MaxInf = (int32)SWB->GetMaxBoneInfluences();
-
-	auto LegFromBone = [](const FName& Bone) -> int32
-	{
-		const FString S = Bone.ToString();
-		if (S.EndsWith(TEXT("_FL"))) { return 0; }
-		if (S.EndsWith(TEXT("_FR"))) { return 1; }
-		if (S.EndsWith(TEXT("_BL"))) { return 2; }
-		if (S.EndsWith(TEXT("_BR"))) { return 3; }
-		return INDEX_NONE;
-	};
-
-	TArray<FColor> Colors;
-	Colors.Init(BodyColor.ToFColor(false), NumVerts);
-
-	for (const FSkelMeshRenderSection& Section : LOD.RenderSections)
-	{
-		for (uint32 v = 0; v < Section.NumVertices; ++v)
-		{
-			const int32 GlobalV = Section.BaseVertexIndex + v;
-
-			// Dominant influence for this vertex.
-			int32 BestInf = 0;
-			uint16 BestW = 0;
-			for (int32 inf = 0; inf < MaxInf; ++inf)
-			{
-				const uint16 W = SWB->GetBoneWeight(GlobalV, inf);
-				if (W > BestW) { BestW = W; BestInf = inf; }
-			}
-			const int32 LocalBone = SWB->GetBoneIndex(GlobalV, BestInf);
-			if (!Section.BoneMap.IsValidIndex(LocalBone)) { continue; }
-			const FName BoneName = RefSkel.GetBoneName(Section.BoneMap[LocalBone]);
-
-			const int32 Leg = LegFromBone(BoneName);
-			if (Leg != INDEX_NONE && LegColors.IsValidIndex(Leg))
-			{
-				Colors[GlobalV] = LegColors[Leg].ToFColor(false);
-			}
-		}
-	}
-
-	CachedSlot0Material = Mesh->GetMaterial(0);
-	Mesh->SetVertexColorOverride(0, Colors);
-	if (DebugMaterial)
-	{
-		Mesh->SetMaterial(0, DebugMaterial);
-	}
 }
