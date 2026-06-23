@@ -4,6 +4,8 @@
 #include "Components/ActorComponent.h"
 #include "RogoGaitComponent.generated.h"
 
+class UPhysicalAnimationComponent;
+
 /**
  * Stateful quadruped gait, computed on the pawn (where per-tick state actually persists,
  * unlike the AnimBP-hosted Control Rig). Each tick it advances a phase, and per leg holds
@@ -134,6 +136,31 @@ public:
 	/** Feet that found real support this tick (read-only). */
 	UPROPERTY(BlueprintReadOnly, Category = "RogoGait|Balance")
 	int32 SupportedFeet = 0;
+
+	// --- Physical parts: per-bone bodies simulate toward the gait pose so they collide/deflect. ---
+
+	/** Drive the body+legs as simulated physics bodies motored toward the gait pose (real
+	 *  per-part collision). Off = pure kinematic mesh. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RogoGait|PhysParts")
+	bool bPhysicalParts = true;
+
+	/** Bone at/below which the bodies simulate (root stays kinematic, anchored to the capsule). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RogoGait|PhysParts")
+	FName PhysSimRootBone = TEXT("body");
+
+	/** Motor stiffness pulling each body's orientation to the animated pose (higher = stiffer
+	 *  follow, less deflection). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RogoGait|PhysParts")
+	float PhysAnimStrength = 1500.f;
+
+	/** Motor damping on angular velocity error (higher = calmer). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RogoGait|PhysParts")
+	float PhysAnimDamping = 80.f;
+
+	/** Clamp on the motor's angular force (0 = unlimited). Lower lets hard collisions overpower
+	 *  the motor and deflect the limbs. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RogoGait|PhysParts")
+	float PhysAnimMaxForce = 0.f;
 
 	/** Tilt the body to match the slope under the feet (pitch/roll), so it leans into hills
 	 *  instead of staying flat. Also equalises leg reach on grades. */
@@ -271,6 +298,12 @@ private:
 	float SmoothTurn = 0.f;
 	bool bDynInit = false;
 	float UnbalanceTime = 0.f;                   // how long the body has overhung unsupported ground
+
+	TObjectPtr<UPhysicalAnimationComponent> PhysAnim = nullptr;   // motors the simulated bodies
+	bool bPhysSetup = false;
+
+	/** One-time physical-animation setup (sim the body+legs, motor them to the pose). */
+	void SetupPhysicalParts();
 
 	// Per-leg state (world space) + the rest layout sampled once from the mesh ref pose.
 	TArray<FVector> PlantAnchors;     // world plant point held through stance
