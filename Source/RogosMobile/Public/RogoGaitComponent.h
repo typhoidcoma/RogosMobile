@@ -112,6 +112,29 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RogoGait|Ground")
 	float StepOverGain = 0.6f;
 
+	/** A foothold more than this far BELOW the foot's rest height is out of leg reach (a ledge
+	 *  drop / cliff) -> rejected, so the foot gathers onto solid ground instead of stretching. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RogoGait|Ground")
+	float MaxFootReachDrop = 40.f;
+
+	// --- Balance: topple into a ragdoll when the body overhangs unsupported ground. ---
+
+	/** When too few feet support the body and its center hangs past them, ragdoll off the edge. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RogoGait|Balance")
+	bool bBalanceTopple = true;
+
+	/** How far (cm) the body center may hang past the supporting feet before it's unbalanced. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RogoGait|Balance")
+	float BalanceMargin = 38.f;
+
+	/** Seconds the body must stay unbalanced before it topples (debounce vs momentary gaps). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RogoGait|Balance")
+	float BalanceGrace = 0.4f;
+
+	/** Feet that found real support this tick (read-only). */
+	UPROPERTY(BlueprintReadOnly, Category = "RogoGait|Balance")
+	int32 SupportedFeet = 0;
+
 	/** Tilt the body to match the slope under the feet (pitch/roll), so it leans into hills
 	 *  instead of staying flat. Also equalises leg reach on grades. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RogoGait|Ground")
@@ -247,6 +270,7 @@ private:
 	float SmoothFwdAccel = 0.f;                  // low-passed body-frame accel + turn rate
 	float SmoothTurn = 0.f;
 	bool bDynInit = false;
+	float UnbalanceTime = 0.f;                   // how long the body has overhung unsupported ground
 
 	// Per-leg state (world space) + the rest layout sampled once from the mesh ref pose.
 	TArray<FVector> PlantAnchors;     // world plant point held through stance

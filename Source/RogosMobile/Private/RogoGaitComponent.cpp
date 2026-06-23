@@ -197,25 +197,33 @@ void URogoGaitComponent::TickComponent(float DeltaTime, ELevelTick TickType, FAc
 		if (UKismetSystemLibrary::LineTraceSingle(World, Start, End, ETraceTypeQuery::TraceTypeQuery1,
 			false, Ignore, EDrawDebugTrace::None, Hit, true))
 		{
-			return { (Hit.ImpactNormal.Z >= FootWalkableZ), (float)(Hit.Location.Z + FootGroundOffset) };
+			// Valid foothold = hit, not too steep, AND within leg reach (not a far-below ledge drop).
+			const bool bOk = (Hit.ImpactNormal.Z >= FootWalkableZ)
+				&& (Hit.Location.Z >= FlatZ - MaxFootReachDrop);
+			return { bOk, (float)(Hit.Location.Z + FootGroundOffset) };
 		}
 		return { false, FlatZ };   // miss = gap/cliff -> not a foothold
 	};
 
 	// Find solid ground for a foot: try the desired spot, else pull inward toward the hip.
-	auto FindFoothold = [&](const FVector& Desired, const FVector& Hip) -> FVector
+	// bOutSupported = whether real ground was found (false = floating, fed to the balance check).
+	auto FindFoothold = [&](const FVector& Desired, const FVector& Hip, bool& bOutSupported) -> FVector
 	{
 		const FGroundProbe d = Probe(Desired.X, Desired.Y, Hip.Z);
-		if (!bFootholdCheck || d.bValid) { return FVector(Desired.X, Desired.Y, d.Z); }
+		if (!bFootholdCheck || d.bValid) { bOutSupported = d.bValid; return FVector(Desired.X, Desired.Y, d.Z); }
 		for (float Pull = 0.34f; Pull <= 1.001f; Pull += 0.33f)   // 0.34, 0.67, 1.0 toward the hip
 		{
 			const float X = FMath::Lerp(Desired.X, Hip.X, Pull);
 			const float Y = FMath::Lerp(Desired.Y, Hip.Y, Pull);
 			const FGroundProbe p = Probe(X, Y, Hip.Z);
-			if (p.bValid) { return FVector(X, Y, p.Z); }
+			if (p.bValid) { bOutSupported = true; return FVector(X, Y, p.Z); }
 		}
+		bOutSupported = false;
 		return FVector(Hip.X, Hip.Y, Hip.Z);   // nothing solid -> least-bad: under the hip, flat height
 	};
+
+	int32 NumSup = 0;
+	FVector2D SupSum(0.f, 0.f);   // sum of supported feet XY -> support centroid for the balance check
 
 	for (int32 i = 0; i < NumLegs; ++i)
 	{
@@ -233,7 +241,9 @@ void URogoGaitComponent::TickComponent(float DeltaTime, ELevelTick TickType, FAc
 
 		// Next plant: under the hip, led forward by Amp, on a validated foothold (gaps/edges/
 		// too-steep spots are pulled in toward the hip until solid ground is found).
-		const FVector Landing = FindFoothold(Home + Move * Amp, Home);
+		bool bSupported = false;
+		const FVector Landing = FindFoothold(Home + Move * Amp, Home, bSupported);
+		if (bSupported) { ++NumSup; SupSum += FVector2D(Landing.X, Landing.Y); }
 
 		// Touchdown = swing->stance transition (phase wrapped past 1.0 into [0,Stance)).
 		const bool bJustLanded = (PrevLegPhase[i] >= Stance) && bStance;
@@ -264,6 +274,28 @@ void URogoGaitComponent::TickComponent(float DeltaTime, ELevelTick TickType, FAc
 		FeetTargetsWorld[i] = FTransform(Foot);
 		FootGround[i] = FVector(Foot.X, Foot.Y, SurfaceZ);
 		PrevLegPhase[i] = LegPhase;
+	}
+
+	// Balance: if too few feet have real support AND the body center hangs past them (perched on
+	// a ledge edge), topple into a ragdoll after a short grace so it tumbles off.
+	SupportedFeet = NumSup;
+	if (bBalanceTopple && NumLegs >= 4)
+	{
+		const FVector AL = ActorXf.GetLocation();
+		const FVector2D ActorXY(AL.X, AL.Y);
+		bool bUnbalanced = false;
+		if (NumSup <= 2)
+		{
+			const FVector2D Centroid = (NumSup > 0) ? (SupSum / (float)NumSup) : ActorXY;
+			bUnbalanced = FVector2D::Distance(ActorXY, Centroid) > BalanceMargin;
+		}
+		UnbalanceTime = bUnbalanced ? (UnbalanceTime + DeltaTime) : FMath::Max(0.f, UnbalanceTime - DeltaTime * 2.f);
+		if (UnbalanceTime > BalanceGrace)
+		{
+			UnbalanceTime = 0.f;
+			SetRagdoll(true);   // tumble off the edge
+			return;
+		}
 	}
 
 	// Body height: speed/terrain-tuned crouch (EffCrouch) lowers the body so legs fold (spider)
