@@ -125,9 +125,9 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RogoGait|Balance")
 	bool bBalanceTopple = true;
 
-	/** How far (cm) the body center may hang past the supporting feet before it's unbalanced. */
+	/** Tip-over angle (DEGREES): how far the body may lean off its support base before it topples. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RogoGait|Balance")
-	float BalanceMargin = 38.f;
+	float BalanceMargin = 55.f;
 
 	/** Seconds the body must stay unbalanced before it topples (debounce vs momentary gaps). */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RogoGait|Balance")
