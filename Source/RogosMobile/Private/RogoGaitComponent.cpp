@@ -5,6 +5,7 @@
 #include "GameFramework/CharacterMovementComponent.h"
 #include "GameFramework/Character.h"
 #include "Components/CapsuleComponent.h"
+#include "PhysicsEngine/PhysicalAnimationComponent.h"
 #include "Engine/SkeletalMesh.h"
 #include "Rendering/SkeletalMeshRenderData.h"
 #include "Rendering/SkeletalMeshLODRenderData.h"
@@ -36,6 +37,38 @@ void URogoGaitComponent::BeginPlay()
 	{
 		ApplyLegDebugColors();
 	}
+	if (bPhysicalParts)
+	{
+		SetupPhysicalParts();
+	}
+}
+
+void URogoGaitComponent::SetupPhysicalParts()
+{
+	if (bPhysSetup) { return; }
+	AActor* Owner = GetOwner();
+	if (Owner == nullptr) { return; }
+	USkeletalMeshComponent* Mesh = Owner->FindComponentByClass<USkeletalMeshComponent>();
+	PhysAnim = Owner->FindComponentByClass<UPhysicalAnimationComponent>();
+	if (Mesh == nullptr || PhysAnim == nullptr) { return; }   // physanim component not attached yet
+
+	// Simulate the body + legs (root stays kinematic, anchored to the moving capsule), then motor
+	// them toward the animated (Control Rig) pose. They follow the gait but collide/deflect off
+	// the world. Self-collision stays OFF (the auto-gen bodies overlap and would explode).
+	Mesh->SetAllBodiesBelowSimulatePhysics(PhysSimRootBone, true);
+	Mesh->SetEnableGravity(false);        // the motors define the pose; gravity is re-enabled on ragdoll
+
+	PhysAnim->SetSkeletalMeshComponent(Mesh);
+	FPhysicalAnimationData S;
+	S.bIsLocalSimulation = true;          // simulate RELATIVE to the kinematic root -> inherits the
+	S.OrientationStrength = PhysAnimStrength;   // pawn's motion (correct for a moving character)
+	S.AngularVelocityStrength = PhysAnimDamping;
+	S.PositionStrength = 0.f;             // local mode: position held by the joint, not a motor
+	S.VelocityStrength = 0.f;
+	S.MaxLinearForce = 0.f;
+	S.MaxAngularForce = (PhysAnimMaxForce > 0.f) ? PhysAnimMaxForce : 1.0e7f;
+	PhysAnim->ApplyPhysicalAnimationSettingsBelow(PhysSimRootBone, S, true);
+	bPhysSetup = true;
 }
 
 void URogoGaitComponent::SampleRestLayout()
@@ -393,28 +426,38 @@ void URogoGaitComponent::SetRagdoll(bool bOn)
 		{
 			// Keep the existing (non-self-colliding) profile: the auto-generated per-bone bodies
 			// overlap, so enabling body-vs-body collision (the "Ragdoll" profile) explodes them.
+			Mesh->SetEnableGravity(true);                            // physanim disabled it; ragdoll needs it
 			Mesh->SetAllBodiesPhysicsBlendWeight(1.f);
 			Mesh->SetAllPhysicsLinearVelocity(FVector::ZeroVector);   // drop any inherited velocity
 			Mesh->SetAllBodiesSimulatePhysics(true);
-			Mesh->SetSimulatePhysics(true);
+			Mesh->SetSimulatePhysics(true);                          // whole mesh incl. root -> full tumble
 			Mesh->WakeAllRigidBodies();
 		}
+		if (PhysAnim) { PhysAnim->SetStrengthMultiplyer(0.f); }      // motors off -> limp
 	}
 	else
 	{
 		// Best-effort recovery: stop simulating, re-enable movement + the gait.
+		const float HH = (Ch && Ch->GetCapsuleComponent()) ? Ch->GetCapsuleComponent()->GetScaledCapsuleHalfHeight() : 59.f;
 		if (Mesh)
 		{
 			Mesh->SetSimulatePhysics(false);
 			Mesh->SetCollisionProfileName(TEXT("PhysicsActor"));
 			Mesh->AttachToComponent(Ch ? (USceneComponent*)Ch->GetCapsuleComponent() : Owner->GetRootComponent(),
 				FAttachmentTransformRules::SnapToTargetNotIncludingScale);
-			Mesh->SetRelativeLocationAndRotation(FVector(0.f, 0.f, -59.f), FRotator(0.f, -90.f, 0.f));
+			Mesh->SetRelativeLocationAndRotation(FVector(0.f, 0.f, -HH), FRotator(0.f, -90.f, 0.f));
 		}
 		if (Ch && Ch->GetCapsuleComponent()) { Ch->GetCapsuleComponent()->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics); }
 		if (CMC) { CMC->SetMovementMode(MOVE_Walking); }
 		bInitialised = false;   // re-sample the rest layout
 		SetComponentTickEnabled(true);
+		// Restore the physical-animation parts (re-sim body+legs + motors) for the recovered walk.
+		if (bPhysicalParts)
+		{
+			bPhysSetup = false;
+			SetupPhysicalParts();
+			if (PhysAnim) { PhysAnim->SetStrengthMultiplyer(1.f); }
+		}
 	}
 }
 
