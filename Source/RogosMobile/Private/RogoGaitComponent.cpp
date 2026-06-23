@@ -348,24 +348,29 @@ void URogoGaitComponent::TickComponent(float DeltaTime, ELevelTick TickType, FAc
 		PrevLegPhase[i] = LegPhase;
 	}
 
-	// Balance: if too few feet have real support AND the body center hangs past them (perched on
-	// a ledge edge), topple into a ragdoll after a short grace so it tumbles off.
+	// Topple to ragdoll ONLY when the body tips too far over: measure the LEAN of the body off its
+	// support base -- the angle from vertical of the line from the support centroid (feet on real
+	// ground) up to the body. Balanced/upright (incl. walkable slopes, where the feet still sit
+	// under the body) -> small angle. Perched half off a ledge so the body hangs past its feet ->
+	// large angle -> tip over. Must exceed BalanceMargin (DEGREES) for BalanceGrace before it falls.
 	SupportedFeet = NumSup;
 	if (bBalanceTopple && NumLegs >= 4)
 	{
-		const FVector AL = ActorXf.GetLocation();
-		const FVector2D ActorXY(AL.X, AL.Y);
-		bool bUnbalanced = false;
-		if (NumSup <= 2)
+		bool bTipped = false;
+		if (NumSup > 0)
 		{
-			const FVector2D Centroid = (NumSup > 0) ? (SupSum / (float)NumSup) : ActorXY;
-			bUnbalanced = FVector2D::Distance(ActorXY, Centroid) > BalanceMargin;
+			const FVector AL = ActorXf.GetLocation();
+			const FVector2D Centroid = SupSum / (float)NumSup;
+			const float LeanDist = FVector2D(AL.X - Centroid.X, AL.Y - Centroid.Y).Size();
+			const float BodyH = FMath::Max(20.f, RestDrop);   // body sits ~RestDrop above the feet
+			const float TipDeg = FMath::RadiansToDegrees(FMath::Atan2(LeanDist, BodyH));
+			bTipped = TipDeg > BalanceMargin;   // BalanceMargin reused as the tip angle in degrees
 		}
-		UnbalanceTime = bUnbalanced ? (UnbalanceTime + DeltaTime) : FMath::Max(0.f, UnbalanceTime - DeltaTime * 2.f);
+		UnbalanceTime = bTipped ? (UnbalanceTime + DeltaTime) : FMath::Max(0.f, UnbalanceTime - DeltaTime * 2.f);
 		if (UnbalanceTime > BalanceGrace)
 		{
 			UnbalanceTime = 0.f;
-			SetRagdoll(true);   // tumble off the edge
+			SetRagdoll(true);   // tipped past the threshold -> fall over
 			return;
 		}
 	}
