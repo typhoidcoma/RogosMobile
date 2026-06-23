@@ -63,11 +63,27 @@ void URogoGaitComponent::SetupPhysicalParts()
 	S.bIsLocalSimulation = true;          // simulate RELATIVE to the kinematic root -> inherits the
 	S.OrientationStrength = PhysAnimStrength;   // pawn's motion (correct for a moving character)
 	S.AngularVelocityStrength = PhysAnimDamping;
-	S.PositionStrength = 0.f;             // local mode: position held by the joint, not a motor
-	S.VelocityStrength = 0.f;
-	S.MaxLinearForce = 0.f;
+	// A local-space LINEAR motor too (not just orientation): without it the bodies drift -- the legs
+	// stretch up when the kinematic root accelerates (falling / stepping off a ledge), because the
+	// accelerating sim frame pushes them off-target. The position motor pulls them back to the pose.
+	S.PositionStrength = PhysAnimStrength;
+	S.VelocityStrength = PhysAnimDamping;
+	S.MaxLinearForce = (PhysAnimMaxForce > 0.f) ? PhysAnimMaxForce : 1.0e6f;
 	S.MaxAngularForce = (PhysAnimMaxForce > 0.f) ? PhysAnimMaxForce : 1.0e7f;
 	PhysAnim->ApplyPhysicalAnimationSettingsBelow(PhysSimRootBone, S, true);
+
+	// Keep the FEET (ankle bodies) KINEMATIC so the IK plants them cleanly. If they simulate, then
+	// with gravity off any upward ground-contact impulse ratchets them up (nothing settles them back)
+	// and the legs slowly stretch off the floor. The body + upper legs still simulate/collide/deflect.
+	for (const FName& Hip : HipBones)
+	{
+		FString Suffix;
+		if (Hip.ToString().Split(TEXT("_"), nullptr, &Suffix))
+		{
+			const FName Ankle(*(FString(TEXT("ankle_")) + Suffix));
+			Mesh->SetAllBodiesBelowSimulatePhysics(Ankle, false, true);   // ankle + below -> kinematic
+		}
+	}
 	bPhysSetup = true;
 }
 
@@ -130,6 +146,29 @@ void URogoGaitComponent::TickComponent(float DeltaTime, ELevelTick TickType, FAc
 		if (!bInitialised)
 		{
 			return;
+		}
+	}
+
+	// Physical-sim NaN watchdog: a simulated body can explode (overlapping auto-gen bodies, a hard
+	// world contact, or a fast capsule teleport) -> the post-physics blend then writes a NaN bone
+	// into the Control Rig ("Bone (knee_FR) contains NaN" ensure + a broken mesh). Detect it from
+	// the mesh bounds and snap the bodies back to the animated (kinematic) pose so it self-heals
+	// instead of corrupting the anim. Runs PrePhysics, before this frame's sim step + blend.
+	if (bPhysicalParts && bPhysSetup)
+	{
+		if (USkeletalMeshComponent* M = GetOwner()->FindComponentByClass<USkeletalMeshComponent>())
+		{
+			const FBoxSphereBounds& B = M->Bounds;
+			const FVector ActorLoc = GetOwner()->GetActorLocation();
+			if (B.Origin.ContainsNaN() || !FMath::IsFinite(B.SphereRadius) || B.SphereRadius > 2.0e4f
+				|| FVector::DistSquared(B.Origin, ActorLoc) > FMath::Square(160.f))   // gross drift: legs stretched off-pose
+			{
+				M->SetAllBodiesBelowSimulatePhysics(PhysSimRootBone, false);   // -> kinematic, snaps clean
+				M->SetAllPhysicsLinearVelocity(FVector::ZeroVector);
+				M->SetAllPhysicsAngularVelocityInRadians(FVector::ZeroVector);
+				bPhysSetup = false;
+				SetupPhysicalParts();   // re-sim + re-motor from the clean pose
+			}
 		}
 	}
 
