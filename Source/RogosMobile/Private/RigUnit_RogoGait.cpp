@@ -33,7 +33,7 @@ FRigUnit_RogoGait_Execute()
 		{
 			const FVector UpComp = OwningComp->GetComponentTransform()
 				.InverseTransformVectorNoScale(Gait->BodyUpWorld).GetSafeNormal();
-			if (!UpComp.IsNearlyZero())
+			if (!UpComp.IsNearlyZero() && !UpComp.ContainsNaN())
 			{
 				const FQuat Tilt = FQuat::FindBetweenNormals(FVector::UpVector, UpComp);
 				BodyTransform.SetRotation(Tilt * BodyTransform.GetRotation());
