@@ -45,6 +45,43 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "RogoGait|Dynamics")
 	void Die();
 
+	/** Launch the capsule up + along WorldDir (a hop). Grounded check is the caller's job; this is the
+	 *  raw launch the auto obstacle-hop and BT/anim notifies share. UpSpeed/FwdSpeed are cm/s; pass <0
+	 *  to use the JumpUpSpeed / JumpForwardSpeed defaults. */
+	UFUNCTION(BlueprintCallable, Category = "RogoGait|Obstacle")
+	void Hop(FVector WorldDir, float UpSpeed = -1.f, float FwdSpeed = -1.f);
+
+	// --- Obstacle hop: jump when walking into a wall too steep for the legs to step over. ---
+
+	/** Auto-hop when the pawn is grounded and moving into a steep, non-walkable face ahead. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RogoGait|Obstacle")
+	bool bObstacleJump = true;
+
+	/** Min planar speed (cm/s) before an obstacle hop can trigger (must actually be moving into it). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RogoGait|Obstacle")
+	float ObstacleMinSpeed = 40.f;
+
+	/** Forward reach (cm) of the wall sensor trace from the capsule center. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RogoGait|Obstacle")
+	float ObstacleProbeDist = 70.f;
+
+	/** Height of the wall sensor relative to the capsule center (cm). Lower = catches shorter walls,
+	 *  but the walkable-normal test still rejects ramps so it won't hop up slopes. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RogoGait|Obstacle")
+	float ObstacleProbeZ = 0.f;
+
+	/** Upward launch speed of the hop (cm/s). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RogoGait|Obstacle")
+	float JumpUpSpeed = 420.f;
+
+	/** Forward launch speed of the hop, into the obstacle (cm/s). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RogoGait|Obstacle")
+	float JumpForwardSpeed = 220.f;
+
+	/** Min seconds between auto obstacle hops (stops re-firing every tick while pinned to the wall). */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RogoGait|Obstacle")
+	float JumpCooldown = 1.2f;
+
 	/** Base cadence at zero speed (cycles/sec). */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "RogoGait")
 	float Frequency = 1.5f;
@@ -252,6 +289,7 @@ private:
 	float SmoothTurn = 0.f;
 	bool bDynInit = false;
 	float UnbalanceTime = 0.f;                   // how long the body has overhung unsupported ground
+	float JumpCooldownTimer = 0.f;               // counts down between auto obstacle hops
 
 	// Per-leg state (world space) + the rest layout sampled once from the mesh ref pose.
 	TArray<FVector> PlantAnchors;     // world plant point held through stance

@@ -96,6 +96,34 @@ void URogoGaitComponent::TickComponent(float DeltaTime, ELevelTick TickType, FAc
 		Move = ActorXf.GetUnitAxis(EAxis::X);   // idle -> face forward
 	}
 
+	// Obstacle hop: grounded and walking into a face too steep for the legs to step over -> launch
+	// up+forward to try to clear it. Sensor is a forward trace at body height; short steps pass under
+	// it (the gait steps over those), and the walkable-normal test rejects ramps. Cooldown stops it
+	// re-firing every tick while still pinned to the wall. IsFalling() during the airborne arc keeps
+	// the balance-topple below from ragdolling the hop (see the falling guard there).
+	const bool bGrounded = !(Owner->FindComponentByClass<UCharacterMovementComponent>()
+		&& Owner->FindComponentByClass<UCharacterMovementComponent>()->IsFalling());
+	if (JumpCooldownTimer > 0.f) { JumpCooldownTimer -= DeltaTime; }
+	if (bObstacleJump && bGrounded && Speed >= ObstacleMinSpeed && JumpCooldownTimer <= 0.f)
+	{
+		if (UWorld* W = GetWorld())
+		{
+			const FVector Origin = ActorXf.GetLocation() + FVector(0.f, 0.f, ObstacleProbeZ);
+			const FVector End = Origin + Move * ObstacleProbeDist;
+			FHitResult Hit;
+			TArray<AActor*> Ignore;
+			Ignore.Add(GetOwner());
+			const float WalkableZ = FMath::Cos(FMath::DegreesToRadians(FMath::Clamp(FootMaxAngleDeg, 5.f, 89.f)));
+			if (UKismetSystemLibrary::LineTraceSingle(W, Origin, End, ETraceTypeQuery::TraceTypeQuery1,
+					false, Ignore, EDrawDebugTrace::None, Hit, true)
+				&& Hit.ImpactNormal.Z < WalkableZ)   // steep face -> can't walk up -> hop over it
+			{
+				Hop(Move, JumpUpSpeed, JumpForwardSpeed);
+				JumpCooldownTimer = JumpCooldown;
+			}
+		}
+	}
+
 	// Body-dynamics spring: lean from momentum (inertial lag) + banking into turns. The Sway
 	// (pitch,roll) is integrated here and folded into BodyUpWorld below (after the slope tilt).
 	if (bBodyDynamics && DeltaTime > KINDA_SMALL_NUMBER)
@@ -266,7 +294,11 @@ void URogoGaitComponent::TickComponent(float DeltaTime, ELevelTick TickType, FAc
 	// under the body) -> small angle. Perched half off a ledge so the body hangs past its feet ->
 	// large angle -> tip over. Must exceed BalanceMargin (DEGREES) for BalanceGrace before it falls.
 	SupportedFeet = NumSup;
-	if (bBalanceTopple && NumLegs >= 4)
+	if (!bGrounded)
+	{
+		UnbalanceTime = 0.f;   // airborne (hop / launch arc): no feet support is expected, don't topple
+	}
+	else if (bBalanceTopple && NumLegs >= 4)
 	{
 		bool bTipped = false;
 		if (NumSup > 0)
@@ -362,6 +394,19 @@ void URogoGaitComponent::Knockback(FVector WorldDir, float Speed)
 		Ch->LaunchCharacter(WorldDir.GetSafeNormal() * Speed, true, false);   // override planar velocity
 	}
 	AddBodyImpulse(WorldDir, Speed * 0.3f);   // body lurches with the shove
+}
+
+void URogoGaitComponent::Hop(FVector WorldDir, float UpSpeed, float FwdSpeed)
+{
+	const float Up = (UpSpeed < 0.f) ? JumpUpSpeed : UpSpeed;
+	const float Fwd = (FwdSpeed < 0.f) ? JumpForwardSpeed : FwdSpeed;
+	FVector D(WorldDir.X, WorldDir.Y, 0.f);
+	D.Normalize();   // zero dir -> straight-up hop
+	if (ACharacter* Ch = Cast<ACharacter>(GetOwner()))
+	{
+		Ch->LaunchCharacter(D * Fwd + FVector(0.f, 0.f, Up), true, true);   // override both planar + vertical
+	}
+	AddBodyImpulse(WorldDir, Up * 0.2f);   // body lurches with the launch
 }
 
 void URogoGaitComponent::SetRagdoll(bool bOn)
